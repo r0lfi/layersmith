@@ -76,6 +76,7 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
         "created": build.finished_at.astimezone(timezone.utc).isoformat() if build.finished_at else None,
         "export_sha256": export_sha,
         "layersmith_version": config.VERSION,
+        "layersmith_revision": config.REVISION,
     }
 
 

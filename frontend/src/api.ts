@@ -70,12 +70,13 @@ export interface Spec {
   scripts?: Record<string, string>;
   env?: { name: string; value: string }[];
   tests?: string[];
+  enable_epel?: boolean;
   workdir?: string;
   tag_latest?: boolean;
 }
 
 export interface Catalog {
-  distributions: { name: string; family: string; versions: string[]; sources: Record<string, string> }[];
+  distributions: { name: string; family: string; el: boolean; versions: string[]; sources: Record<string, string> }[];
   families: Record<string, string>;
   architectures: string[];
   templates: { name: string; description: string; spec: Spec }[];
@@ -87,7 +88,10 @@ export interface Catalog {
 export interface Settings {
   app_name: string;
   version: string;
+  revision: string;
   tagline: string;
+  source_url: string;
+  license: string;
   default_architecture: string;
   default_namespace: string;
   build_backend: {

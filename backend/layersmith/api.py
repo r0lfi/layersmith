@@ -149,7 +149,9 @@ def _safe_download(path_value: str | None, allowed_dirs: list[Path]) -> Path:
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "app": config.APP_NAME, "version": config.VERSION}
+    """Liveness for the container healthcheck and for upgrade checks."""
+    return {"status": "ok", "app": config.APP_NAME, "version": config.VERSION,
+            "revision": config.REVISION}
 
 
 @router.get("/catalog")
@@ -157,8 +159,8 @@ def get_catalog():
     """Everything the wizard needs to render its choices."""
     return {
         "distributions": [
-            {"name": name, "family": entry["family"], "versions": list(entry["versions"]),
-             "sources": entry["versions"]}
+            {"name": name, "family": entry["family"], "el": bool(entry.get("el")),
+             "versions": list(entry["versions"]), "sources": entry["versions"]}
             for name, entry in catalog.DISTROS.items()
         ],
         "families": catalog.FAMILIES,
@@ -179,7 +181,8 @@ def get_settings(state=Depends(get_state)):
     backend = make_backend(app_settings)
     available, detail = backend.available()
     return {
-        "app_name": config.APP_NAME, "version": config.VERSION, "tagline": config.TAGLINE,
+        "app_name": config.APP_NAME, "version": config.VERSION, "revision": config.REVISION,
+        "tagline": config.TAGLINE, "source_url": config.SOURCE_URL, "license": config.LICENSE,
         "default_architecture": app_settings.default_architecture,
         "default_namespace": app_settings.default_namespace,
         "build_backend": {"name": backend.name, "selection": app_settings.build_backend,

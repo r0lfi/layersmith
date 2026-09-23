@@ -1,12 +1,47 @@
+# Python
 __pycache__/
 *.py[cod]
 .venv/
+venv/
 .pytest_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Node / frontend build output
 node_modules/
-frontend/dist/
+dist/
+*.tsbuildinfo
+
+# The built UI is copied into the backend at image build time
+backend/static/
+
+# Local runtime data: never commit anything LayerSmith writes at runtime
 data/
+builds/
+images/
+exports/
+uploads/
+logs/
+secrets/
 *.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Archives, including exported images and air-gap bundles
 *.tar
 *.tar.gz
+*.tgz
+*.zip
+
+# Environment files. .env.example is committed; real ones never are.
+.env
+.env.*
+!.env.example
+
+# Editors and OS
 .DS_Store
-backend/static/
+.idea/
+.vscode/

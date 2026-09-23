@@ -62,7 +62,9 @@ PACKAGE_MAP = {
     "python3-devel": {"rpm": "python3-devel", "deb": "python3-dev", "apk": "python3-dev"},
     "venv": {"rpm": None, "deb": "python3-venv", "apk": None},
     "nodejs": {"rpm": "nodejs", "deb": "nodejs", "apk": "nodejs"},
-    "npm": {"rpm": "npm", "deb": "npm", "apk": "npm"},
+    # npm has no separate package on rpm distributions; installing nodejs
+    # provides it (verified on AlmaLinux 10 and Fedora 43).
+    "npm": {"rpm": "nodejs", "deb": "npm", "apk": "npm"},
     "shellcheck": {"rpm": "ShellCheck", "deb": "shellcheck", "apk": "shellcheck"},
     "procps": {"rpm": "procps-ng", "deb": "procps", "apk": "procps"},
     "which": {"rpm": "which", "deb": "debianutils", "apk": "which"},
@@ -71,7 +73,7 @@ PACKAGE_MAP = {
     "sysstat": {"rpm": "sysstat", "deb": "sysstat", "apk": "sysstat"},
     "build-essentials": {"rpm": "make", "deb": "build-essential", "apk": "build-base"},
     "bash-completion": {"rpm": "bash-completion", "deb": "bash-completion", "apk": "bash-completion"},
-    "iotop": {"rpm": "iotop", "deb": "iotop", "apk": "iotop"},
+    "iotop": {"rpm": "iotop-c", "deb": "iotop", "apk": "iotop"},
     "tcpdump": {"rpm": "tcpdump", "deb": "tcpdump", "apk": "tcpdump"},
     "nmap": {"rpm": "nmap", "deb": "nmap", "apk": "nmap"},
     "iperf3": {"rpm": "iperf3", "deb": "iperf3", "apk": "iperf3"},
@@ -82,6 +84,13 @@ PACKAGE_MAP = {
     "htop": {"rpm": "htop", "deb": "htop", "apk": "htop"},
     "ansible-core": {"rpm": "ansible-core", "deb": "ansible-core", "apk": "ansible-core"},
 }
+
+# Capabilities whose rpm package is only in EPEL, so it is absent from a plain
+# Enterprise Linux base (AlmaLinux, Rocky, CentOS Stream) but present in
+# Fedora. Without "Enable EPEL" these are skipped with a warning rather than
+# failing the build halfway through. Verified against almalinux:10 and
+# fedora:43.
+EPEL_ONLY = {"shellcheck", "htop"}
 
 # Tools with no distro package: a released binary is fetched (or uploaded for
 # offline use), checksummed and copied into the image. {version} and {arch}

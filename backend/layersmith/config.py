@@ -16,7 +16,14 @@ from pathlib import Path
 
 APP_NAME = "LayerSmith"
 TAGLINE = "Build container images with purpose."
-VERSION = "0.1.0"
+SOURCE_URL = "https://github.com/r0lfi/layersmith"
+LICENSE = "MIT"
+
+#: Release identity. The image build stamps these from the git tag and commit
+#: (see the Containerfile and .github/workflows/container.yml); a source
+#: checkout reports a development build rather than pretending to be a release.
+VERSION = os.environ.get("LAYERSMITH_VERSION") or "0.0.0-dev"
+REVISION = os.environ.get("LAYERSMITH_REVISION") or "unknown"
 
 
 #: Paths an administrator may change at runtime, with their environment

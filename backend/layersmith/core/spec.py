@@ -212,8 +212,18 @@ def resolve_packages(spec):
         tools += preset.get("tools", [])
     generic += spec.get("packages") or []
 
+    # Enterprise Linux ships a smaller base than Fedora; some capabilities are
+    # only in EPEL there.
+    enterprise_linux = catalog.DISTROS.get(spec["base"].get("distribution"), {}).get("el", False)
+    epel_enabled = bool(spec.get("enable_epel"))
+
     names, warnings = [], []
     for name in generic:
+        if family == "rpm" and enterprise_linux and name in catalog.EPEL_ONLY and not epel_enabled:
+            warnings.append(
+                f"{name} is only in EPEL on this distribution; enable EPEL or drop it. Skipped."
+            )
+            continue
         mapped = catalog.PACKAGE_MAP.get(name, {}).get(family, name) if name in catalog.PACKAGE_MAP else name
         if mapped is None:
             warnings.append(

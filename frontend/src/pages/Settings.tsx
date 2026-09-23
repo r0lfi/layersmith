@@ -38,10 +38,38 @@ export default function SettingsPage() {
     <>
       <h1>Settings</h1>
 
-      <Card title="General">
+      <Card title="About">
+        <div className="row" style={{ alignItems: "flex-start", gap: "1rem" }}>
+          <img src="/logo-mark.svg" alt="" width={48} height={48} />
+          <div>
+            <h2 style={{ margin: 0 }}>
+              {data.app_name} <span className="faint">{data.version}</span>
+            </h2>
+            <p className="dim" style={{ margin: "0.1rem 0" }}>{data.tagline}</p>
+            <p className="faint" style={{ margin: 0 }}>by xnett.org</p>
+          </div>
+        </div>
+        <table className="table" style={{ marginTop: "0.8rem" }}>
+          <tbody>
+            <tr><td data-label="Version">Version</td><td className="mono">{data.version}</td></tr>
+            <tr>
+              <td data-label="Revision">Revision</td>
+              <td className="mono truncate" title={data.revision}>{data.revision}</td>
+            </tr>
+            <tr><td data-label="License">License</td><td>{data.license}</td></tr>
+            <tr>
+              <td data-label="Source">Source</td>
+              <td>
+                <a href={data.source_url} target="_blank" rel="noreferrer noopener">{data.source_url}</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </Card>
+
+      <Card title="Defaults">
         <table className="table">
           <tbody>
-            <tr><td data-label="Application">Application</td><td>{data.app_name} {data.version}</td></tr>
             <tr>
               <td data-label="Default architecture">Default architecture</td>
               <td className="mono">{data.default_architecture}</td>

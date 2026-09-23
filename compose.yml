@@ -1,27 +1,49 @@
-# LayerSmith - single service, one volume.
+# LayerSmith - self-hosted container image builder.
 #
-# Building images needs a container runtime. The default setup talks to a
-# Podman socket on the host, which keeps the build outside this container
-# instead of granting it privileged access. See docs/deployment.md for the
-# alternatives, including a separate build host.
+#   docker compose up -d      (or: podman compose up -d)
+#   open http://localhost:8080
+#
+# LayerSmith serves the web application; the images your users build are made
+# by a container runtime on the host, reached through the socket mounted
+# below. That socket is powerful: anything able to use it can run containers
+# as its owner. LayerSmith has no authentication in 0.1.x, so keep it on a
+# trusted network or put an authenticating proxy in front of it.
+# See docs/deployment.md for the alternatives, including a separate build host.
+
 services:
   layersmith:
-    image: ghcr.io/example/layersmith:latest
+    image: ghcr.io/r0lfi/layersmith:latest
+    # Pin a release in production, for example:
+    #   image: ghcr.io/r0lfi/layersmith:0.1.0
     container_name: layersmith
     restart: unless-stopped
+
     ports:
       - "8080:8080"
+
     environment:
       LAYERSMITH_DATA_DIR: /data
-      # The image ships the Docker CLI; Podman's socket speaks the same API,
-      # so this works for both. Swap the mount below for Docker's socket to
-      # build with Docker instead.
+      # "docker" drives a Docker socket and equally a rootless Podman socket,
+      # which speaks the same API. "podman" requires a podman client in the
+      # image and is meant for running LayerSmith directly on a host instead.
       LAYERSMITH_BUILD_BACKEND: docker
-      DOCKER_HOST: unix:///run/podman/podman.sock
+      DOCKER_HOST: unix:///var/run/docker.sock
+
     volumes:
+      # Everything LayerSmith keeps - database, images, builds, uploads, logs.
       - layersmith-data:/data
-      # Rootless Podman socket from the host (systemctl --user start podman.socket):
-      - ${XDG_RUNTIME_DIR}/podman/podman.sock:/run/podman/podman.sock
+      # Docker host: the daemon socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Rootless Podman host: comment out the line above and use this instead,
+      # after `systemctl --user enable --now podman.socket`:
+      # - ${XDG_RUNTIME_DIR}/podman/podman.sock:/var/run/docker.sock
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
 volumes:
   layersmith-data:

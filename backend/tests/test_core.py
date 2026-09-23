@@ -190,3 +190,36 @@ def test_script_body_adds_a_shebang_only_when_missing():
 ])
 def test_import_finds_external_bases(text, expected):
     assert containerfile.bases(text) == expected
+
+
+@pytest.mark.parametrize("distribution,version,expected", [
+    ("AlmaLinux", "10", None),          # EPEL-only there: skipped with a warning
+    ("Fedora", "43", "ShellCheck"),     # present in Fedora's own repositories
+    ("Ubuntu", "24.04", "shellcheck"),
+    ("Alpine", "3.22", "shellcheck"),
+])
+def test_epel_only_packages_are_skipped_on_enterprise_linux(distribution, version, expected):
+    resolved, warnings = resolve_packages(spec(
+        base={"distribution": distribution, "version": version}, presets=[], packages=["shellcheck"]))
+    if expected is None:
+        assert resolved == [] and any("EPEL" in w for w in warnings)
+    else:
+        assert resolved == [expected] and warnings == []
+
+
+def test_epel_only_packages_are_kept_when_epel_is_enabled():
+    resolved, warnings = resolve_packages(spec(presets=[], packages=["shellcheck"], enable_epel=True))
+    assert resolved == ["ShellCheck"] and warnings == []
+
+
+@pytest.mark.parametrize("capability,family,expected", [
+    ("npm", "rpm", "nodejs"),     # no separate npm package on rpm distributions
+    ("npm", "deb", "npm"),
+    ("iotop", "rpm", "iotop-c"),  # packaged under a different name
+    ("iotop", "deb", "iotop"),
+])
+def test_package_names_that_differ_by_more_than_spelling(capability, family, expected):
+    base = {"rpm": {"distribution": "AlmaLinux", "version": "10"},
+            "deb": {"distribution": "Ubuntu", "version": "24.04"}}[family]
+    resolved, _ = resolve_packages(spec(base=base, presets=[], packages=[capability]))
+    assert resolved == [expected]

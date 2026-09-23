@@ -21,6 +21,7 @@ interface Draft {
   imageVersion: string;
   description: string;
   architecture: string;
+  enableEpel: boolean;
 }
 
 const EMPTY: Draft = {
@@ -39,6 +40,7 @@ const EMPTY: Draft = {
   imageVersion: "1.0.0",
   description: "",
   architecture: "amd64",
+  enableEpel: false,
 };
 
 function buildSpec(draft: Draft, catalog: Catalog): Spec {
@@ -51,6 +53,7 @@ function buildSpec(draft: Draft, catalog: Catalog): Spec {
     presets: draft.presets,
     packages: draft.packages,
     extra_packages: draft.extraPackages.split(/[\s,]+/).filter(Boolean),
+    enable_epel: draft.enableEpel,
     files: draft.files.map((file) => ({ sha256: file.sha256, destination: file.destination })),
     scripts: Object.fromEntries(Object.entries(draft.scripts).filter(([, body]) => body.trim())),
     tests: catalog.templates.find((t) => t.name === draft.template)?.spec.tests ?? [],
@@ -291,16 +294,34 @@ export default function NewProject() {
         )}
 
         {step === 4 && (
-          <Field
-            label="Additional packages"
-            hint="Exact package names for the chosen distribution, separated by spaces or commas."
-          >
-            <input
-              value={draft.extraPackages}
-              onChange={(event) => update({ extraPackages: event.target.value })}
-              placeholder="htop ncdu"
-            />
-          </Field>
+          <>
+            <Field
+              label="Additional packages"
+              hint="Exact package names for the chosen distribution, separated by spaces or commas."
+            >
+              <input
+                value={draft.extraPackages}
+                onChange={(event) => update({ extraPackages: event.target.value })}
+                placeholder="ncdu tcpflow"
+              />
+            </Field>
+            {distribution?.el && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={draft.enableEpel}
+                  onChange={(event) => update({ enableEpel: event.target.checked })}
+                />
+                <span>
+                  <strong>Enable EPEL</strong>
+                  <span className="faint">
+                    {" "}— Enterprise Linux ships a smaller base than Fedora. Tools such as shellcheck and htop
+                    live in EPEL; without this they are skipped with a warning.
+                  </span>
+                </span>
+              </label>
+            )}
+          </>
         )}
 
         {step === 5 && (

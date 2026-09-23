@@ -2,93 +2,190 @@
   <img src="brand/logo.svg" alt="LayerSmith" width="360">
 </p>
 
-<p align="center"><strong>Build container images with purpose.</strong><br>
-<sub>by xnett.org</sub></p>
+<h3 align="center">Build container images with purpose.</h3>
+
+<p align="center">
+  LayerSmith is a self-hosted web interface for building OCI container images
+  without writing Containerfiles by hand. Pick a Linux distribution, say what
+  the image is for, choose your tools, build it, and take away an OCI image,
+  a TAR archive or an air-gap bundle.
+</p>
+
+<p align="center"><sub>by xnett.org</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="LayerSmith dashboard" width="820">
+</p>
 
 ---
 
-LayerSmith is a self-hosted web application for building, versioning and
-exporting OCI container images. Choose a base, choose a purpose, pick your
-tools, and LayerSmith writes the Containerfile, builds the image with Podman,
-streams the log to your browser and hands you a versioned image, an OCI
-archive or an air-gap bundle.
+## Quick start
 
-Advanced users keep full control: import an existing Dockerfile or
-Containerfile, or switch a project to Advanced mode and write it yourself.
+```bash
+git clone https://github.com/r0lfi/layersmith.git
+cd layersmith
+docker compose up -d        # or: podman compose up -d
+```
+
+Open <http://localhost:8080>.
+
+With Podman directly, using its rootless socket as the build backend:
+
+```bash
+systemctl --user enable --now podman.socket
+
+podman run -d \
+  --name layersmith \
+  --restart=unless-stopped \
+  -p 8080:8080 \
+  -v layersmith-data:/data \
+  -v $XDG_RUNTIME_DIR/podman/podman.sock:/var/run/docker.sock \
+  -e DOCKER_HOST=unix:///var/run/docker.sock \
+  ghcr.io/r0lfi/layersmith:latest
+```
+
+> **Before you expose it:** LayerSmith 0.1.x has **no authentication**, and the
+> mounted socket lets it run containers as the socket's owner. Keep it on a
+> trusted network, or put an authenticating proxy in front of it. See
+> [docs/deployment.md](docs/deployment.md) for setups that isolate the builder.
 
 ## Why
 
 Writing a good Containerfile by hand means remembering that DNS tools are
 `bind-utils` on AlmaLinux, `dnsutils` on Ubuntu and `bind-tools` on Alpine,
-that `apt-get` needs `--no-install-recommends` and a cleanup, and that a
-`latest` tag quietly changes under you. LayerSmith knows those things.
+that `apt-get` needs `--no-install-recommends` and a cleanup afterwards, and
+that a `latest` tag quietly changes under you. LayerSmith knows those things,
+and shows you the Containerfile it produced before anything is built.
 
 ## Features
 
-- **Purpose-driven wizard** — Developer, Linux Admin, Network Tools, Ansible,
-  Kubernetes, OpenShift, Minimal or Custom.
-- **Distro-aware packages** — templates request capabilities, not package
-  names; LayerSmith translates per distribution (dnf / apt / apk).
-- **Generated Containerfile** — readable output you can inspect before
-  building, or take over in Advanced mode.
-- **Import** — paste or upload an existing Dockerfile/Containerfile.
-- **Immutable, versioned builds** — a version is built once, never
-  overwritten, and every build records the exact Containerfile, base digest,
-  package list, file checksums and log.
-- **Digest-pinned bases** — builds do not silently follow a moved tag.
-- **Live build logs** — streamed to the browser over a WebSocket.
-- **Export** — OCI archive with a recorded SHA256.
+- **Purpose-driven templates** — Developer, Linux Admin, Network Tools,
+  Ansible, Kubernetes, OpenShift, Minimal, or start from nothing.
+- **Distro-aware packages** — templates ask for capabilities, and LayerSmith
+  translates them per distribution (`dnf` / `apt` / `apk`).
+- **Distributions** — AlmaLinux, Rocky Linux, CentOS Stream, Fedora, Ubuntu,
+  Debian, Alpine, or any other OCI base image you name.
+- **Generated Containerfile**, shown before you build and editable if you take
+  over in Advanced mode.
+- **Import** an existing Dockerfile or Containerfile and build that instead.
+- **Custom packages, files and scripts** — pre-build, post-install and
+  entrypoint hooks.
+- **Immutable versioned builds** — a version is built once, never overwritten,
+  and each build records its Containerfile, base digest, package list, file
+  checksums and log.
+- **Digest-pinned bases**, so a rebuild does not silently follow a moved tag.
+- **Live build logs**, streamed to the browser.
+- **OCI TAR export** with a recorded SHA256.
 - **Air-gap bundles** — image, manifest, source Containerfile, `SHA256SUMS`
-  and `INSTALL.txt` in one `.tar.gz` that loads with no network access.
-- **Podman or Docker** — either runtime builds; `auto` picks whichever the
-  host has. Bundles load with either, whatever built them.
+  and `INSTALL.txt` in one archive that loads with no network access.
+- **Podman or Docker** as the build backend.
 - **API first** — the web UI uses the same HTTP API you can script against.
 
-## Quick start
+## Screenshots
 
-```
-podman run -d \
-  --name layersmith \
-  -p 8080:8080 \
-  -v layersmith-data:/data \
-  ghcr.io/example/layersmith:latest
+| Dashboard | Create image wizard |
+| --- | --- |
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Create image](docs/screenshots/create-image.png) |
+
+| Live build log | Build and image details |
+| --- | --- |
+| ![Build](docs/screenshots/build.png) | ![Image details](docs/screenshots/image-details.png) |
+
+## Two kinds of image
+
+The documentation keeps these apart, and so should you:
+
+| Term | Meaning |
+| --- | --- |
+| **LayerSmith application image** | `ghcr.io/r0lfi/layersmith` — LayerSmith itself, published by this repository |
+| **Built image** | an image a LayerSmith user creates through the web UI |
+
+## Which tag to run
+
+| Tag | Meaning |
+| --- | --- |
+| `0.1.0` | an exact release — **recommended for production** |
+| `0.1`, `0` | newest patch within that minor/major line |
+| `latest` | newest stable release |
+| `edge` | built from `main` on every merge; development, not stable |
+
+```yaml
+services:
+  layersmith:
+    image: ghcr.io/r0lfi/layersmith:0.1.0
 ```
 
-Open <http://localhost:8080>. See [docs/deployment.md](docs/deployment.md)
-for building images inside a container, Docker/Compose, and running the API
-and the builder on separate hosts.
+Prereleases (`v0.2.0-rc1`) publish only their exact tag; they never move
+`latest`.
+
+## Build backends
+
+LayerSmith serves the web application; the actual image building is done by a
+container runtime. Supported combinations:
+
+| Running LayerSmith | Build backend | Notes |
+| --- | --- | --- |
+| Container (Docker) | Docker socket mounted | What `compose.yml` does |
+| Container (Podman) | rootless Podman socket mounted | Mount it at `/var/run/docker.sock`; the API is compatible |
+| Directly on a host | that host's Podman or Docker | Most isolation, no socket mount |
+
+The application image carries a Docker client only, which also drives a Podman
+socket. Running LayerSmith directly on a host uses that host's own client and
+can use Podman natively. `LAYERSMITH_BUILD_BACKEND` accepts `auto`, `podman`
+or `docker`; the Settings page shows what was detected.
+
+A socket mount is deliberate, not accidental: whoever can reach LayerSmith can
+run containers as the socket's owner. `docs/deployment.md` describes the
+alternatives.
 
 ## Configuration
 
-Every path is configurable. The default is one data directory so a container
-needs a single volume mount; a native install usually points it at
-`/var/lib/layersmith`. (`/opt` is for the application's own files under the
-FHS, not for the data it writes.)
-
-The five paths below the data directory are also editable in **Settings →
-Storage** at runtime, and the change is stored in the database. A path set
-through the environment wins and is shown read-only, so deployment decisions
-stay with whoever wrote the unit or compose file. Changing a path does not
-move existing files; archives written earlier stay downloadable.
+Everything is optional; see [.env.example](.env.example) for the full list.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LAYERSMITH_DATA_DIR` | `/data` | Base directory for everything below (holds the database) |
+| `LAYERSMITH_DATA_DIR` | `/data` | Everything LayerSmith keeps, including the database |
 | `LAYERSMITH_IMAGE_DIR` | `$DATA/images` | Exported archives and air-gap bundles |
 | `LAYERSMITH_BUILD_DIR` | `$DATA/builds` | Build contexts |
-| `LAYERSMITH_UPLOAD_DIR` | `$DATA/uploads` | Uploaded files and tool binaries |
+| `LAYERSMITH_UPLOAD_DIR` | `$DATA/uploads` | Uploaded files |
 | `LAYERSMITH_LOG_DIR` | `$DATA/logs` | Build logs |
-| `LAYERSMITH_TMP_DIR` | `$DATA/tmp` | Temporary working space |
-| `LAYERSMITH_DATABASE_URL` | `sqlite:///$DATA/layersmith.db` | Database |
+| `LAYERSMITH_TMP_DIR` | `$DATA/tmp` | Scratch space |
+| `LAYERSMITH_DATABASE_URL` | `sqlite:///$DATA/layersmith.db` | Any SQLAlchemy URL |
 | `LAYERSMITH_BUILD_BACKEND` | `auto` | `auto`, `podman` or `docker` |
-| `LAYERSMITH_PODMAN_BINARY` | `podman` | Path to the Podman client |
-| `LAYERSMITH_DOCKER_BINARY` | `docker` | Path to the Docker client |
-| `LAYERSMITH_DEFAULT_ARCH` | `amd64` | Default architecture |
-| `LAYERSMITH_DEFAULT_NAMESPACE` | `layersmith` | Default image namespace |
-| `LAYERSMITH_STATIC_DIR` | `./static` next to the package | Built web UI, for installed deployments |
+| `LAYERSMITH_DEFAULT_ARCH` | `amd64` | Architecture offered first |
+| `LAYERSMITH_DEFAULT_NAMESPACE` | `layersmith` | Namespace for new image names |
 
-Missing directories are created at startup and checked for write access, so a
-bad mount fails immediately with a clear message.
+The five paths under the data directory are also editable at runtime in
+**Settings → Storage**. A value set in the environment wins and is shown
+read-only there. Changing a path never moves existing files, and archives
+written earlier stay downloadable.
+
+## Data and upgrades
+
+All state lives under `/data`: the database, exported images, build contexts,
+uploads and logs. Keep that volume and an upgrade keeps your projects, build
+history and archives.
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+```bash
+podman pull ghcr.io/r0lfi/layersmith:latest
+podman rm -f layersmith
+# then re-run your original podman run command
+```
+
+Back up the volume the ordinary way; `/data` is all there is.
+
+## Architecture
+
+- **Backend** — FastAPI, SQLite by default, one build worker thread.
+- **Frontend** — React and Vite, served by the backend on the same port.
+- **Build backends** — a small interface (`available`, `resolve_base`,
+  `build`, `inspect`, `export`, `remove`) with Podman and Docker
+  implementations, so a remote build agent can be added without touching the
+  rest.
 
 ## Security
 
@@ -98,32 +195,31 @@ LayerSmith runs build jobs, so it is treated as security-sensitive:
 - Image references, package names, paths, versions and environment variable
   names are matched against explicit patterns before use.
 - Uploaded files are content-addressed and re-verified by checksum before
-  they enter a build context.
+  entering a build context.
 - Environment variables that look like credentials are refused: secrets must
   not be baked into an image.
-- Downloads are restricted to the configured image directory.
+- Downloads are limited to directories LayerSmith itself writes to.
 
-Report security issues privately rather than in a public issue.
+**Known limitations in 0.1.x**, in full in
+[docs/deployment.md](docs/deployment.md): no authentication; a build runs code
+you supply; nothing is garbage collected; no quotas; one build at a time.
+
+Report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
 
 ## Development
 
-```
+```bash
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest            # unit and API tests, no Podman required
-.venv/bin/uvicorn layersmith.api:create_app --factory --reload
+.venv/bin/pytest                 # no container runtime needed
+.venv/bin/uvicorn layersmith.api:create_app --factory --reload --port 8080
+
+cd ../frontend
+npm install && npm run dev       # proxies /api to port 8080
 ```
 
-The test suite uses a fake build backend, so it runs anywhere. Building real
-images needs Podman or Docker on the host running the backend:
-
-```
-LAYERSMITH_SMOKE=1 .venv/bin/pytest tests/test_runtime_smoke.py -v
-```
-
-That builds a real image with every runtime installed on the host, runs it to
-confirm the packages are actually present, exports it and loads the archive
-back. Runtimes that are not installed are skipped.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the longer version, and
+[docs/RELEASING.md](docs/RELEASING.md) for how releases are cut.
 
 ## License
 
