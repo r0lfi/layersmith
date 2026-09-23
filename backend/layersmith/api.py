@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 
 from layersmith import config
 from layersmith.backends.base import BuildError
-from layersmith.backends.podman import PodmanBackend
+from layersmith.backends import make_backend, probe_all
 from layersmith.core import catalog
 from layersmith.core import containerfile as cf
 from layersmith.core.spec import (
@@ -157,13 +157,16 @@ def get_catalog():
 def get_settings():
     app_settings = config.settings()
     usage = shutil.disk_usage(app_settings.data_dir)
-    backend = PodmanBackend(app_settings.podman_binary)
+    backend = make_backend(app_settings)
     available, detail = backend.available()
     return {
         "app_name": config.APP_NAME, "version": config.VERSION, "tagline": config.TAGLINE,
         "default_architecture": app_settings.default_architecture,
         "default_namespace": app_settings.default_namespace,
-        "build_backend": {"name": app_settings.build_backend, "available": available, "detail": detail},
+        "build_backend": {"name": backend.name, "selection": app_settings.build_backend,
+                          "available": available, "detail": detail,
+                          "archive_format": backend.archive_format,
+                          "runtimes": probe_all(app_settings)},
         "paths": {
             "data": str(app_settings.data_dir), "images": str(app_settings.image_dir),
             "builds": str(app_settings.build_dir), "uploads": str(app_settings.upload_dir),
@@ -424,7 +427,7 @@ def create_app(settings=None) -> FastAPI:
     engine = make_engine(settings.database_url)
     create_all(engine)
     session_factory = make_session_factory(engine)
-    backend = PodmanBackend(settings.podman_binary)
+    backend = make_backend(settings)
     service = BuildService(session_factory, backend, settings=settings)
 
     app = FastAPI(title=config.APP_NAME, version=config.VERSION,

@@ -33,8 +33,10 @@ INSTALL_TEXT = """LayerSmith air-gap bundle
 Verify, then load the image on the offline host:
 
   sha256sum -c SHA256SUMS
-  podman load -i image/{archive_name}
-  podman images
+  {load_command}
+
+The archive is a {archive_format}; both podman and docker can load it, so the
+offline host does not have to run the same runtime that built it.
 
 The bundle also contains:
 
@@ -274,8 +276,11 @@ class BuildService:
             (staging / "metadata" / "manifest.json").write_text(
                 json.dumps(manifest_for(project, build, build.export_sha256), indent=2) + "\n", encoding="utf-8")
             (staging / "source" / "Containerfile").write_text(build.containerfile, encoding="utf-8")
+            load_command = self.backend.load_command(f"image/{export.name}")
             (staging / "INSTALL.txt").write_text(
-                INSTALL_TEXT.format(image_ref=build.image_ref, archive_name=export.name), encoding="utf-8")
+                INSTALL_TEXT.format(image_ref=build.image_ref, load_command=load_command,
+                                    archive_format=getattr(self.backend, "archive_format", "OCI archive")),
+                encoding="utf-8")
 
             sums = []
             for path in sorted(staging.rglob("*")):

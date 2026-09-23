@@ -40,6 +40,8 @@ that `apt-get` needs `--no-install-recommends` and a cleanup, and that a
 - **Export** — OCI archive with a recorded SHA256.
 - **Air-gap bundles** — image, manifest, source Containerfile, `SHA256SUMS`
   and `INSTALL.txt` in one `.tar.gz` that loads with no network access.
+- **Podman or Docker** — either runtime builds; `auto` picks whichever the
+  host has. Bundles load with either, whatever built them.
 - **API first** — the web UI uses the same HTTP API you can script against.
 
 ## Quick start
@@ -70,7 +72,9 @@ container needs a single volume.
 | `LAYERSMITH_LOG_DIR` | `$DATA/logs` | Build logs |
 | `LAYERSMITH_TMP_DIR` | `$DATA/tmp` | Temporary working space |
 | `LAYERSMITH_DATABASE_URL` | `sqlite:///$DATA/layersmith.db` | Database |
-| `LAYERSMITH_BUILD_BACKEND` | `podman` | Build backend to use |
+| `LAYERSMITH_BUILD_BACKEND` | `auto` | `auto`, `podman` or `docker` |
+| `LAYERSMITH_PODMAN_BINARY` | `podman` | Path to the Podman client |
+| `LAYERSMITH_DOCKER_BINARY` | `docker` | Path to the Docker client |
 | `LAYERSMITH_DEFAULT_ARCH` | `amd64` | Default architecture |
 | `LAYERSMITH_DEFAULT_NAMESPACE` | `layersmith` | Default image namespace |
 | `LAYERSMITH_STATIC_DIR` | `./static` next to the package | Built web UI, for installed deployments |
@@ -103,7 +107,15 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```
 
 The test suite uses a fake build backend, so it runs anywhere. Building real
-images needs Podman on the host running the backend.
+images needs Podman or Docker on the host running the backend:
+
+```
+LAYERSMITH_SMOKE=1 .venv/bin/pytest tests/test_runtime_smoke.py -v
+```
+
+That builds a real image with every runtime installed on the host, runs it to
+confirm the packages are actually present, exports it and loads the archive
+back. Runtimes that are not installed are skipped.
 
 ## License
 

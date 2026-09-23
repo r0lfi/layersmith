@@ -13,8 +13,11 @@ services:
       - "8080:8080"
     environment:
       LAYERSMITH_DATA_DIR: /data
-      # Points at the mounted Podman socket below.
-      CONTAINER_HOST: unix:///run/podman/podman.sock
+      # The image ships the Docker CLI; Podman's socket speaks the same API,
+      # so this works for both. Swap the mount below for Docker's socket to
+      # build with Docker instead.
+      LAYERSMITH_BUILD_BACKEND: docker
+      DOCKER_HOST: unix:///run/podman/podman.sock
     volumes:
       - layersmith-data:/data
       # Rootless Podman socket from the host (systemctl --user start podman.socket):

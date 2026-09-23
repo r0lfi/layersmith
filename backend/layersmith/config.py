@@ -34,6 +34,7 @@ class Settings:
     database_url: str
     build_backend: str
     podman_binary: str
+    docker_binary: str
     default_architecture: str
     default_namespace: str
     max_upload_bytes: int
@@ -70,8 +71,10 @@ def load() -> Settings:
         log_dir=_path("LAYERSMITH_LOG_DIR", data_dir / "logs"),
         tmp_dir=_path("LAYERSMITH_TMP_DIR", data_dir / "tmp"),
         database_url=os.environ.get("LAYERSMITH_DATABASE_URL", f"sqlite:///{data_dir / 'layersmith.db'}"),
-        build_backend=os.environ.get("LAYERSMITH_BUILD_BACKEND", "podman"),
+        # auto: prefer Podman, fall back to Docker. See backends/__init__.py.
+        build_backend=os.environ.get("LAYERSMITH_BUILD_BACKEND", "auto"),
         podman_binary=os.environ.get("LAYERSMITH_PODMAN_BINARY", "podman"),
+        docker_binary=os.environ.get("LAYERSMITH_DOCKER_BINARY", "docker"),
         default_architecture=os.environ.get("LAYERSMITH_DEFAULT_ARCH", "amd64"),
         default_namespace=os.environ.get("LAYERSMITH_DEFAULT_NAMESPACE", "layersmith"),
         max_upload_bytes=int(os.environ.get("LAYERSMITH_MAX_UPLOAD_BYTES", 512 * 1024 * 1024)),

@@ -33,15 +33,43 @@ export default function SettingsPage() {
 
       <Card title="Build backend">
         {data.build_backend.available ? (
-          <Banner kind="info">{data.build_backend.name}: {data.build_backend.detail}</Banner>
+          <Banner kind="info">
+            Building with <strong>{data.build_backend.name}</strong> ({data.build_backend.detail}), exporting a{" "}
+            {data.build_backend.archive_format}.
+          </Banner>
         ) : (
           <Banner>
-            {data.build_backend.name} is not usable, so builds will fail: {data.build_backend.detail}
+            No usable container runtime, so builds will fail: {data.build_backend.detail}
           </Banner>
         )}
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Runtime</th>
+              <th>Status</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.build_backend.runtimes.map((runtime) => (
+              <tr key={runtime.name}>
+                <td data-label="Runtime">
+                  <span className="mono">{runtime.name}</span>
+                  {runtime.name === data.build_backend.name && (
+                    <span className="pill ready" style={{ marginLeft: 8 }}>in use</span>
+                  )}
+                </td>
+                <td data-label="Status">{runtime.available ? "available" : "not available"}</td>
+                <td data-label="Detail" className="faint">{runtime.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <p className="faint">
-          The backend is selected with <span className="mono">LAYERSMITH_BUILD_BACKEND</span>. Building images
-          requires a container runtime; see the deployment documentation for running the builder on a separate host.
+          <span className="mono">LAYERSMITH_BUILD_BACKEND</span> is{" "}
+          <span className="mono">{data.build_backend.selection}</span>: <span className="mono">auto</span> prefers
+          Podman and falls back to Docker, or name one explicitly. See the deployment documentation for running the
+          builder on a separate host.
         </p>
       </Card>
 

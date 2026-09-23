@@ -90,7 +90,14 @@ export interface Settings {
   tagline: string;
   default_architecture: string;
   default_namespace: string;
-  build_backend: { name: string; available: boolean; detail: string };
+  build_backend: {
+    name: string;
+    selection: string;
+    available: boolean;
+    detail: string;
+    archive_format: string;
+    runtimes: { name: string; available: boolean; detail: string }[];
+  };
   paths: Record<string, string>;
   storage: { total: number; used: number; free: number };
 }

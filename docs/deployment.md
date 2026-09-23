@@ -5,9 +5,23 @@ is where the *builds* run, because a container that can build images is a
 container with real power on the host. There are three supported shapes; pick
 the one that matches how much you trust the people using the web UI.
 
+## Choosing a runtime
+
+`LAYERSMITH_BUILD_BACKEND` accepts `auto` (default), `podman` or `docker`.
+`auto` uses Podman when it works and Docker otherwise. The Settings page
+shows both runtimes and which one is in use.
+
+Podman is preferred because it builds rootless and needs no daemon, but
+Docker is fully supported: LayerSmith uses `--platform` instead of `--arch`,
+skips the Podman-only flags, and `docker save` writes a docker-archive.
+Both `podman load` and `docker load` read either archive, so an air-gap
+bundle does not tie the recipient to the runtime that built it. The
+generated `INSTALL.txt` names the matching command.
+
 ## 1. Directly on a host (simplest)
 
-Install the backend and run it as a normal user with rootless Podman:
+Install the backend and run it as a normal user with rootless Podman (or
+Docker, if that is what the host runs):
 
 ```
 python3 -m venv /opt/layersmith/venv
@@ -19,7 +33,7 @@ LAYERSMITH_DATA_DIR=/var/lib/layersmith \
 Builds run as that user, with that user's Podman storage. No privileged
 access is involved. This is the recommended setup for a single admin host.
 
-## 2. Container, talking to a Podman socket
+## 2. Container, talking to a runtime socket
 
 The application container has no build capability of its own; it asks a
 Podman socket on the host to do the work.
@@ -32,15 +46,33 @@ podman run -d \
   -p 8080:8080 \
   -v layersmith-data:/data \
   -v $XDG_RUNTIME_DIR/podman/podman.sock:/run/podman/podman.sock \
-  -e CONTAINER_HOST=unix:///run/podman/podman.sock \
+  -e DOCKER_HOST=unix:///run/podman/podman.sock \
   ghcr.io/example/layersmith:latest
 ```
 
-`compose.yml` in the repository root does the same thing.
+For a Docker host, mount the Docker socket instead:
+
+```
+podman run -d --name layersmith -p 8080:8080 \
+  -v layersmith-data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e LAYERSMITH_BUILD_BACKEND=docker \
+  ghcr.io/example/layersmith:latest
+```
+
+The application image ships the Docker CLI, which also drives a rootless
+Podman socket (`systemctl --user start podman.socket`), so container
+deployments work against either runtime with
+`LAYERSMITH_BUILD_BACKEND=docker` and `DOCKER_HOST` pointing at the
+mounted socket. Running directly on a host uses that host's own client
+and can use Podman natively.
+`compose.yml` in the repository root shows the Podman variant.
 
 **What this means:** anything that can talk to that socket can run containers
-as the socket's owner. Mount the *rootless* socket, not the root one, and do
-not expose LayerSmith to untrusted users in this configuration.
+as the socket's owner. For Podman, mount the *rootless* socket rather than the
+root one. The Docker socket is root-equivalent on most hosts by design, so
+that variant grants more than the Podman one; treat access to LayerSmith as
+equivalent to root on the build host, or use option 3.
 
 ## 3. Separate build host (most isolated)
 
