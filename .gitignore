@@ -9,3 +9,4 @@ data/
 *.tar
 *.tar.gz
 .DS_Store
+backend/static/

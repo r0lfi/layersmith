@@ -16,6 +16,7 @@ from fastapi import (
     APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
 )
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
@@ -430,6 +431,20 @@ def create_app(settings=None) -> FastAPI:
                   description=f"{config.TAGLINE} by xnett.org")
     app.state.layersmith = {"session_factory": session_factory, "build_service": service, "settings": settings}
     app.include_router(router)
+
+    # The built web UI, when it has been compiled into ./static (see the
+    # Containerfile). A client-side router means unknown paths must return
+    # index.html rather than 404, but /api must never be swallowed by it.
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    if static_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def spa(full_path: str):
+            candidate = (static_dir / full_path).resolve()
+            if full_path and candidate.is_file() and str(candidate).startswith(str(static_dir)):
+                return FileResponse(candidate)
+            return FileResponse(static_dir / "index.html")
 
     @app.websocket("/api/builds/{build_id}/logs")
     async def build_logs(websocket: WebSocket, build_id: str):

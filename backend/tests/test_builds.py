@@ -1,5 +1,6 @@
 import json
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
@@ -208,3 +209,18 @@ def test_airgap_requires_a_finished_build(env):
     build_id = make_build(env)
     with pytest.raises(BuildError):
         env["service"].airgap_bundle(build_id)
+
+
+def test_queued_build_runs_in_the_background_worker(env):
+    """enqueue() must actually start the worker and finish without help."""
+    build_id = make_build(env)
+    env["service"].enqueue(build_id)
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        with env["factory"]() as session:
+            status = session.get(Build, build_id).status
+        if status in ("ready", "failed"):
+            break
+        time.sleep(0.1)
+    assert status == "ready"

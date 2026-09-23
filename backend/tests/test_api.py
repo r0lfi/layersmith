@@ -15,7 +15,12 @@ def client(tmp_path):
         database_url=f"sqlite:///{tmp_path}/test.db",
     )
     app = create_app(settings)
-    app.state.layersmith["build_service"].backend = FakeBackend()
+    service = app.state.layersmith["build_service"]
+    service.backend = FakeBackend()
+    # Tests drive builds through run_pending_build() so assertions are not
+    # racing the background worker; the queue itself is covered in
+    # test_builds.py::test_queued_build_runs_in_the_background_worker.
+    service.enqueue = lambda build_id: None
     with TestClient(app) as test_client:
         test_client.state = app.state.layersmith
         yield test_client

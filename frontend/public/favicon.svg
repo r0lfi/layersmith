@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="LayerSmith">
+  <title>LayerSmith</title>
+  <rect width="64" height="64" rx="14" fill="#0b1220"/>
+  <!-- Two layers only: at 16px the third one turns to mud. -->
+  <path d="M32 12 56 24 32 36 8 24Z" fill="#22d3ee"/>
+  <path d="M8 33 32 45 56 33 56 38 32 50 8 38Z" fill="#0e7490"/>
+</svg>
