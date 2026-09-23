@@ -291,7 +291,10 @@ class BuildService:
             bundle = Path(self.settings.image_dir) / f"{stem}-airgap.tar.gz"
             with tarfile.open(bundle, "w:gz") as archive:
                 for path in sorted(staging.rglob("*")):
-                    archive.add(path, arcname=str(Path(stem) / path.relative_to(staging)))
+                    # recursive=False: rglob already yields every entry, and
+                    # letting tarfile recurse into directories would add each
+                    # file a second time (and double the bundle size).
+                    archive.add(path, arcname=str(Path(stem) / path.relative_to(staging)), recursive=False)
             shutil.rmtree(staging, ignore_errors=True)
 
             build.airgap_path = str(bundle)

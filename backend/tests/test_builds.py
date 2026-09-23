@@ -192,6 +192,9 @@ def test_airgap_bundle_is_self_contained_and_verifiable(env, tmp_path):
     root = extracted / "layersmith-network-tools-1.0.0"
 
     assert any(n.endswith("image/layersmith-network-tools-1.0.0.tar") for n in names)
+    # Each entry exactly once: adding a directory recursively as well as its
+    # files doubled the bundle size before this was fixed.
+    assert len(names) == len(set(names)), "duplicate entries in the bundle"
     install = (root / "INSTALL.txt").read_text()
     # The load command names the runtime that built it, not a hardcoded one.
     assert "fakectl load -i image/layersmith-network-tools-1.0.0.tar" in install
@@ -231,3 +234,19 @@ def test_queued_build_runs_in_the_background_worker(env):
             break
         time.sleep(0.1)
     assert status == "ready"
+
+
+def export_size_of(env, build_id) -> int:
+    with env["factory"]() as session:
+        return session.get(Build, build_id).export_size
+
+
+def test_bundle_is_not_much_larger_than_the_image_it_contains(env):
+    """A bundle is the archive plus a few small files, never a multiple."""
+    build_id = make_build(env)
+    env["service"].run(build_id)
+    bundle = env["service"].airgap_bundle(build_id)
+    with tarfile.open(bundle) as archive:
+        members = archive.getmembers()
+    image_bytes = sum(m.size for m in members if m.name.endswith(".tar"))
+    assert image_bytes == export_size_of(env, build_id)
