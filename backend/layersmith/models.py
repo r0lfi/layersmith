@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, create_engine, func,
+    BigInteger, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, create_engine, event, func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -140,8 +140,27 @@ def next_build_number(session) -> int:
 
 
 def make_engine(database_url: str):
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, future=True, connect_args=connect_args)
+    """Engine for the API threads and the build worker thread.
+
+    SQLite needs two settings to survive that: WAL so a reader does not block
+    the writer (the UI polls while a build writes), and a busy timeout so a
+    concurrent write waits instead of failing immediately with
+    "database is locked".
+    """
+    if not database_url.startswith("sqlite"):
+        return create_engine(database_url, future=True)
+
+    engine = create_engine(database_url, future=True, connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=10000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    return engine
 
 
 def make_session_factory(engine):

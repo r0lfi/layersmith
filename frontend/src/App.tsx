@@ -22,7 +22,7 @@ export default function App() {
         </NavLink>
         <nav className="nav">
           <NavLink to="/" end>Dashboard</NavLink>
-          <NavLink to="/projects">Projects</NavLink>
+          <NavLink to="/projects">Images</NavLink>
           <NavLink to="/builds">Builds</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>

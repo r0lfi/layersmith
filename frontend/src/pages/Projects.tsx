@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, formatWhen } from "../api";
 import { Banner, Card, Empty, Field, useLoad } from "../components/ui";
 
 export default function Projects() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const { data, error, loading, reload } = useLoad(() => api.projects());
-  const [importing, setImporting] = useState(false);
+  // The dashboard and the wizard link here with ?import=1 to open the form.
+  const [importing, setImporting] = useState(params.get("import") === "1");
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
@@ -24,14 +26,20 @@ export default function Projects() {
   return (
     <>
       <div className="row">
-        <h1>Projects</h1>
+        <div>
+          <h1>Images</h1>
+          <p className="dim" style={{ margin: 0 }}>
+            Each image keeps its definition, its versions and its build history. Build from a template, or
+            import a Dockerfile you already have.
+          </p>
+        </div>
         <span className="spacer" />
-        <button onClick={() => setImporting((value) => !value)}>Import Containerfile</button>
+        <button onClick={() => setImporting((value) => !value)}>Import Dockerfile</button>
         <Link className="button primary" to="/projects/new">New image</Link>
       </div>
 
       {importing && (
-        <Card title="Import Containerfile">
+        <Card title="Import an existing Dockerfile or Containerfile">
           {importError && <Banner>{importError}</Banner>}
           <Field label="Project name" hint="Lowercase letters, digits and dashes.">
             <input value={name} onChange={(event) => setName(event.target.value)} placeholder="imported-image" />

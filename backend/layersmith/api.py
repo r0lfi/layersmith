@@ -8,6 +8,7 @@ path against the configured directory and refuses to leave it.
 import asyncio
 import hashlib
 import json
+import uuid
 import queue
 import shutil
 from pathlib import Path
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from layersmith import config
 from layersmith.backends.base import BuildError
@@ -26,7 +28,8 @@ from layersmith.backends import make_backend, probe_all
 from layersmith.core import catalog
 from layersmith.core import containerfile as cf
 from layersmith.core.spec import (
-    InvalidSpec, NAME_RE, REPOSITORY_RE, VERSION_RE, check, image_ref, next_patch, parse_reference, validate_spec,
+    InvalidSpec, NAME_RE, REPOSITORY_RE, VERSION_RE, check, image_ref, next_patch, parse_reference,
+    validate_spec, version_key,
 )
 from layersmith.models import (
     Blob, Build, Project, create_all, make_engine, make_session_factory, next_build_number, utcnow,
@@ -34,6 +37,10 @@ from layersmith.models import (
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 
 router = APIRouter(prefix="/api")
+
+#: Bounds on how much of a build log is handed to a client at once.
+LOG_REPLY_CHARS = 500_000
+LOG_REPLAY_LINES = 5_000
 
 
 # ------------------------------------------------------------- schemas
@@ -330,8 +337,17 @@ def start_build(project_id: str, payload: BuildIn, state=Depends(get_state)):
                                                             config.settings().default_architecture),
                       image_ref=reference, files=(project.spec or {}).get("files", []))
         session.add(build)
-        project.next_version = next_patch(version)
-        session.commit()
+        # Only move the suggestion forward: building an older version
+        # explicitly must not rewind it.
+        if version_key(next_patch(version)) > version_key(project.next_version):
+            project.next_version = next_patch(version)
+        try:
+            session.commit()
+        except IntegrityError:
+            # Two requests raced past the checks above; the unique constraints
+            # on (project, version) and build number are the real guard.
+            session.rollback()
+            raise HTTPException(409, f"Version {version} is already being built")
         build_id, payload_out = build.id, _build_json(build, project)
 
     service.enqueue(build_id)
@@ -356,7 +372,9 @@ def get_build(build_id: str, state=Depends(get_state)):
         log = build.log
         if not log:
             log_file = state["build_service"].log_path(build_id)
-            log = log_file.read_text(encoding="utf-8") if log_file.is_file() else ""
+            # Bounded: a running build's log can reach the truncation cap, and
+            # this endpoint is polled. The live stream carries the rest.
+            log = log_file.read_text(encoding="utf-8")[-LOG_REPLY_CHARS:] if log_file.is_file() else ""
         return {**_build_json(build, project), "containerfile": build.containerfile, "log": log,
                 "manifest": manifest_for(project, build, build.export_sha256)}
 
@@ -389,18 +407,22 @@ async def upload(file: UploadFile = File(...), state=Depends(get_state)):
     settings = config.settings()
     digest = hashlib.sha256()
     size = 0
-    temporary = Path(settings.tmp_dir) / f"upload-{utcnow().timestamp()}"
-    with open(temporary, "wb") as handle:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            if size > settings.max_upload_bytes:
-                handle.close()
-                temporary.unlink(missing_ok=True)
-                raise HTTPException(413, f"File is larger than {settings.max_upload_bytes // (1024 * 1024)} MiB")
-            digest.update(chunk)
-            handle.write(chunk)
-    checksum = digest.hexdigest()
-    temporary.replace(Path(settings.upload_dir) / checksum)
+    # uuid, not a timestamp: two uploads in the same microsecond would share a
+    # name. The file is removed on any failure, including a dropped request.
+    temporary = Path(settings.tmp_dir) / f"upload-{uuid.uuid4()}"
+    try:
+        with open(temporary, "wb") as handle:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > settings.max_upload_bytes:
+                    raise HTTPException(413,
+                                        f"File is larger than {settings.max_upload_bytes // (1024 * 1024)} MiB")
+                digest.update(chunk)
+                handle.write(chunk)
+        checksum = digest.hexdigest()
+        temporary.replace(Path(settings.upload_dir) / checksum)
+    finally:
+        temporary.unlink(missing_ok=True)
 
     with state["session_factory"]() as session:
         if session.get(Blob, checksum) is None:
@@ -442,12 +464,16 @@ def create_app(settings=None) -> FastAPI:
     if static_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
+        root = static_dir.resolve()
+
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa(full_path: str):
-            candidate = (static_dir / full_path).resolve()
-            if full_path and candidate.is_file() and str(candidate).startswith(str(static_dir)):
+            candidate = (root / full_path).resolve()
+            # is_relative_to, not startswith: "/srv/static" must not match a
+            # sibling "/srv/static-private".
+            if full_path and candidate.is_file() and candidate.is_relative_to(root):
                 return FileResponse(candidate)
-            return FileResponse(static_dir / "index.html")
+            return FileResponse(root / "index.html")
 
     @app.websocket("/api/builds/{build_id}/logs")
     async def build_logs(websocket: WebSocket, build_id: str):
@@ -461,7 +487,12 @@ def create_app(settings=None) -> FastAPI:
         try:
             log_file = service.log_path(build_id)
             if log_file.is_file():
-                for line in log_file.read_text(encoding="utf-8").splitlines():
+                lines = log_file.read_text(encoding="utf-8").splitlines()
+                if len(lines) > LOG_REPLAY_LINES:
+                    await websocket.send_text(json.dumps(
+                        {"type": "log", "line": f"[showing the last {LOG_REPLAY_LINES} of {len(lines)} lines]"}))
+                    lines = lines[-LOG_REPLAY_LINES:]
+                for line in lines:
                     await websocket.send_text(json.dumps({"type": "log", "line": line}))
             with session_factory() as session:
                 build = session.get(Build, build_id)

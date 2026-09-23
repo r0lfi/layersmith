@@ -25,6 +25,8 @@ from layersmith.core import containerfile as cf
 from layersmith.core.spec import export_filename, image_ref
 from layersmith.models import Build, Project, utcnow
 
+MAX_LOG_BYTES = 32 * 1024 * 1024
+
 INSTALL_TEXT = """LayerSmith air-gap bundle
 =========================
 
@@ -147,8 +149,20 @@ class BuildService:
         return Path(self.settings.build_dir) / build_id
 
     def _emit(self, build_id: str, line: str) -> None:
-        with open(self.log_path(build_id), "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        # A build that prints endlessly must not fill the log volume. Past the
+        # cap the log stops growing on disk; live subscribers still see the
+        # output, and the failure reason is usually in the last lines anyway.
+        path = self.log_path(build_id)
+        try:
+            truncated = path.stat().st_size > MAX_LOG_BYTES
+        except FileNotFoundError:
+            truncated = False
+        if not truncated:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+                handle.flush()  # stat() below must see this write, not the buffer
+                if path.stat().st_size > MAX_LOG_BYTES:
+                    handle.write(f"[log truncated at {MAX_LOG_BYTES // (1024 * 1024)} MiB]\n")
         self.logs.publish(build_id, {"type": "log", "line": line})
 
     def _set_status(self, build_id: str, status: str, **fields) -> None:
@@ -201,6 +215,9 @@ class BuildService:
             if build is None or build.status not in ("queued",):
                 return
             project = session.get(Project, build.project_id)
+            if project is None:
+                self._fail(build_id, "The project this build belongs to no longer exists")
+                return
             build.started_at = utcnow()
             build.status = "preparing"
             session.commit()
@@ -242,14 +259,17 @@ class BuildService:
                 build.log = self.log_path(build_id).read_text(encoding="utf-8")[-500000:]
                 session.commit()
 
-            if not self.settings.keep_build_contexts:
-                shutil.rmtree(self.context_dir(build_id), ignore_errors=True)
             self._emit(build_id, f"Image ready: {reference} ({size / 1e6:.1f} MB archive, sha256:{checksum[:12]}…)")
             self.logs.publish(build_id, {"type": "done", "status": "ready"})
         except BuildError as exc:
             self._fail(build_id, str(exc))
         except Exception as exc:
             self._fail(build_id, f"Unexpected error: {exc}")
+        finally:
+            # A failed build left its context behind before this; contexts hold
+            # uploaded files and can be large.
+            if not self.settings.keep_build_contexts:
+                shutil.rmtree(self.context_dir(build_id), ignore_errors=True)
 
     # -------------------------------------------------------- air-gap
 

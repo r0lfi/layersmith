@@ -31,7 +31,8 @@ export default function Dashboard() {
 
       <Card title="Quick build">
         <p className="faint" style={{ marginTop: 0 }}>
-          Start a new project from a template. You choose the base image and tools next.
+          Start from a template and choose the base image and tools next, or import a Dockerfile you
+          already have and build that instead.
         </p>
         <div className="grid cards">
           {QUICK_BUILD.map((template) => (
@@ -44,6 +45,10 @@ export default function Dashboard() {
               <div className="tile-sub">Start from this template</div>
             </button>
           ))}
+          <button className="tile" onClick={() => navigate("/projects?import=1")}>
+            <div className="tile-title">Import Dockerfile</div>
+            <div className="tile-sub">Paste or upload an existing Dockerfile/Containerfile</div>
+          </button>
         </div>
       </Card>
 

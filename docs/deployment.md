@@ -136,6 +136,27 @@ location / {
 }
 ```
 
+## Known limitations in 0.1.0
+
+Things a reviewer should know before putting this anywhere sensitive:
+
+* **No authentication** (see below). Everything else on this list is only
+  interesting in combination with that.
+* **A build runs code you supply.** Advanced mode runs your Containerfile and
+  GUI mode runs your pre-build/post-install scripts, as root inside the build
+  container. That is the product's purpose, but it means anyone who can reach
+  the API can run code on the build host's runtime.
+* **Nothing is garbage collected.** Uploaded files, exported archives, air-gap
+  bundles and build logs stay until you delete them. Deleting a project keeps
+  its builds and archives on purpose, so a download link does not vanish.
+* **No quota on uploads or projects.** A caller can fill the data volume.
+* **Build logs are capped at 32 MiB per build**; past that the log stops
+  growing on disk, with a marker line.
+* **One build at a time**, in a single worker thread. A long build delays the
+  queue behind it.
+* **SQLite is the default.** It is fine for one instance with one build
+  worker; point `LAYERSMITH_DATABASE_URL` at PostgreSQL if you want more.
+
 ## Authentication
 
 0.1.0 has **no built-in authentication**. Anyone who can reach it can start

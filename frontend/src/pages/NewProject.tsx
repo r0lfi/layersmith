@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, Catalog, Spec } from "../api";
 import { Banner, Card, Field, useLoad } from "../components/ui";
 
@@ -152,6 +152,11 @@ export default function NewProject() {
 
       <Card title={`Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`}>
         {step === 0 && (
+          <>
+          <p className="faint" style={{ marginTop: 0 }}>
+            A template preselects tool sets; you can change everything in the next steps. Already have a
+            Dockerfile? <Link to="/projects?import=1">Import it instead</Link>.
+          </p>
           <div className="grid cards">
             {catalog.templates.map((template) => (
               <button
@@ -164,6 +169,7 @@ export default function NewProject() {
               </button>
             ))}
           </div>
+          </>
         )}
 
         {step === 1 && (

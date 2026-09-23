@@ -104,21 +104,38 @@ export default function BuildDetail() {
           </table>
 
           {build.status === "ready" && (
-            <div className="row" style={{ marginTop: "0.8rem" }}>
-              {build.has_export && (
-                <a className="button" href={api.downloadUrl(build.id, "export")}>
-                  Download TAR ({formatBytes(build.export_size)})
-                </a>
-              )}
-              {build.has_airgap ? (
-                <a className="button primary" href={api.downloadUrl(build.id, "airgap")}>
-                  Download air-gap bundle ({formatBytes(build.airgap_size)})
-                </a>
-              ) : (
-                <button className="primary" onClick={makeBundle} disabled={busy}>
-                  {busy ? "Bundling…" : "Create air-gap bundle"}
-                </button>
-              )}
+            <div className="grid two" style={{ marginTop: "1rem" }}>
+              <div>
+                <h3>Image archive</h3>
+                <p className="faint" style={{ marginTop: "0.2rem" }}>
+                  The image on its own, as <span className="mono">podman save</span> /{" "}
+                  <span className="mono">docker save</span> writes it. Load it with{" "}
+                  <span className="mono">load -i</span> on a machine that already knows what it is getting.
+                </p>
+                {build.has_export && (
+                  <a className="button" href={api.downloadUrl(build.id, "export")}>
+                    Download TAR ({formatBytes(build.export_size)})
+                  </a>
+                )}
+              </div>
+              <div>
+                <h3>Air-gap bundle</h3>
+                <p className="faint" style={{ marginTop: "0.2rem" }}>
+                  The same image plus what an offline host needs to verify and understand it: a manifest
+                  (base image and digest, packages, checksums), the Containerfile it was built from,
+                  <span className="mono"> SHA256SUMS</span> and <span className="mono">INSTALL.txt</span>.
+                  Roughly the same size as the TAR.
+                </p>
+                {build.has_airgap ? (
+                  <a className="button primary" href={api.downloadUrl(build.id, "airgap")}>
+                    Download air-gap bundle ({formatBytes(build.airgap_size)})
+                  </a>
+                ) : (
+                  <button className="primary" onClick={makeBundle} disabled={busy}>
+                    {busy ? "Bundling…" : "Create air-gap bundle"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {build.export_sha256 && (
