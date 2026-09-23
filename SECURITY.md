@@ -41,8 +41,9 @@ are:
 
 These are documented design limitations of 0.1.x, not findings:
 
-- **No authentication.** Anyone who can reach LayerSmith can use it. It is
-  meant to sit on a trusted network or behind an authenticating proxy.
+- **No authentication, by design.** LayerSmith is meant to run locally, on a
+  machine or network you trust. Anyone who can reach it can use it; front it
+  with an authenticating proxy if you need logins.
 - **A build runs code you supply.** Advanced mode runs your Containerfile and
   GUI mode runs your build scripts. That is the product.
 - **The mounted runtime socket is powerful.** Whoever can reach LayerSmith can

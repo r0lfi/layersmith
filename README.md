@@ -44,9 +44,10 @@ podman run -d \
   ghcr.io/r0lfi/layersmith:latest
 ```
 
-> **Before you expose it:** LayerSmith 0.1.x has **no authentication**, and the
-> mounted socket lets it run containers as the socket's owner. Keep it on a
-> trusted network, or put an authenticating proxy in front of it. See
+> **By design, LayerSmith has no login.** It is meant to run on a machine you
+> trust — your workstation or a host on your own network — and the mounted
+> socket lets it run containers as the socket's owner. If you need
+> authentication, put a proxy that provides it in front. See
 > [docs/deployment.md](docs/deployment.md) for setups that isolate the builder.
 
 ## Why
@@ -200,9 +201,10 @@ LayerSmith runs build jobs, so it is treated as security-sensitive:
   not be baked into an image.
 - Downloads are limited to directories LayerSmith itself writes to.
 
-**Known limitations in 0.1.x**, in full in
-[docs/deployment.md](docs/deployment.md): no authentication; a build runs code
-you supply; nothing is garbage collected; no quotas; one build at a time.
+**Deliberate boundaries**, in full in
+[docs/deployment.md](docs/deployment.md): no built-in authentication (run it
+somewhere you trust, or front it with a proxy); a build runs code you supply;
+nothing is garbage collected; no quotas; one build at a time.
 
 Report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
 

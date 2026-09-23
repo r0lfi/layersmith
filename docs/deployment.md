@@ -153,8 +153,8 @@ location / {
 
 Things a reviewer should know before putting this anywhere sensitive:
 
-* **No authentication** (see below). Everything else on this list is only
-  interesting in combination with that.
+* **No authentication, by design** (see below). Everything else on this list
+  is only interesting in combination with that.
 * **A build runs code you supply.** Advanced mode runs your Containerfile and
   GUI mode runs your pre-build/post-install scripts, as root inside the build
   container. That is the product's purpose, but it means anyone who can reach
@@ -172,9 +172,18 @@ Things a reviewer should know before putting this anywhere sensitive:
 
 ## Authentication
 
-0.1.0 has **no built-in authentication**. Anyone who can reach it can start
-builds. Put it behind your existing authenticating proxy, or keep it on a
-trusted network, until authentication ships.
+LayerSmith has **no built-in authentication**, and this is a design decision
+rather than a gap waiting to be filled: it is meant to run locally, on a
+machine or network you already trust.
+
+Anyone who can reach it can start builds, and through the mounted runtime
+socket that means running containers as the socket's owner. So:
+
+* run it on your workstation, or on a host only you can reach, and
+* if you need logins, put a proxy that provides them in front of it
+  (authenticating reverse proxy, an identity-aware proxy, or a VPN).
+
+Do not put it on an untrusted network and hope.
 
 ## Building the application image
 
