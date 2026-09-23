@@ -40,6 +40,7 @@ class Settings:
     keep_build_contexts: bool
     agent_url: str
     agent_token: str
+    static_dir: Path | None
 
     @property
     def directories(self) -> list[Path]:
@@ -77,6 +78,10 @@ def load() -> Settings:
         keep_build_contexts=os.environ.get("LAYERSMITH_KEEP_BUILD_CONTEXTS", "").lower() in ("1", "true", "yes"),
         agent_url=os.environ.get("LAYERSMITH_AGENT_URL", ""),
         agent_token=os.environ.get("LAYERSMITH_AGENT_TOKEN", ""),
+        # Where the built web UI lives. Defaults to ./static next to the
+        # package, which is what the Containerfile produces; an installed
+        # deployment points it wherever the assets were unpacked.
+        static_dir=Path(os.environ["LAYERSMITH_STATIC_DIR"]) if os.environ.get("LAYERSMITH_STATIC_DIR") else None,
     )
 
 

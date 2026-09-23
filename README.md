@@ -73,6 +73,7 @@ container needs a single volume.
 | `LAYERSMITH_BUILD_BACKEND` | `podman` | Build backend to use |
 | `LAYERSMITH_DEFAULT_ARCH` | `amd64` | Default architecture |
 | `LAYERSMITH_DEFAULT_NAMESPACE` | `layersmith` | Default image namespace |
+| `LAYERSMITH_STATIC_DIR` | `./static` next to the package | Built web UI, for installed deployments |
 
 Missing directories are created at startup and checked for write access, so a
 bad mount fails immediately with a clear message.

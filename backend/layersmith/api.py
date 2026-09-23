@@ -435,7 +435,7 @@ def create_app(settings=None) -> FastAPI:
     # The built web UI, when it has been compiled into ./static (see the
     # Containerfile). A client-side router means unknown paths must return
     # index.html rather than 404, but /api must never be swallowed by it.
-    static_dir = Path(__file__).resolve().parent.parent / "static"
+    static_dir = settings.static_dir or Path(__file__).resolve().parent.parent / "static"
     if static_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
