@@ -57,21 +57,22 @@ image produced by that release.
 A source checkout reports `0.0.0-dev`, so a locally built image cannot pretend
 to be a release.
 
-## After the first push: make the package public
+## Package visibility
 
-A new GHCR package is private by default, so `podman pull` would ask for
-credentials. Once:
+A package published by Actions from a public repository inherits that
+visibility, so `ghcr.io/r0lfi/layersmith` was pullable anonymously right
+after the first push. Verified with an unauthenticated client.
 
-1. open the package at
-   `https://github.com/users/r0lfi/packages/container/package/layersmith`,
-2. **Package settings → Danger Zone → Change visibility → Public**,
-3. and under **Manage Actions access**, confirm the repository has `write`.
-
-Verify from a machine that is not logged in:
+Check it yourself from a machine that is not logged in to ghcr.io:
 
 ```bash
-podman pull ghcr.io/r0lfi/layersmith:latest
+podman pull ghcr.io/r0lfi/layersmith:edge
 ```
+
+If that ever asks for credentials, the package is private: open
+`https://github.com/users/r0lfi/packages/container/package/layersmith`,
+then **Package settings → Danger Zone → Change visibility → Public**, and
+under **Manage Actions access** confirm the repository has `write`.
 
 ## Checklist before tagging
 
