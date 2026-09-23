@@ -143,3 +143,56 @@ def test_queue_survives_a_build_that_raises(env):  # noqa: F811
     service.enqueue(good)
     service._queue.join()
     assert service._worker.is_alive()
+
+
+# ------------------------------------------------------- storage settings
+
+def test_storage_paths_can_be_changed_and_survive_a_restart(client, tmp_path):  # noqa: F811
+    new_images = tmp_path / "elsewhere" / "images"
+    response = client.put("/api/settings/storage", json={"paths": {"image_dir": str(new_images)}})
+    assert response.status_code == 200
+    assert new_images.is_dir()
+
+    row = [r for r in client.get("/api/settings").json()["paths"] if r["field"] == "image_dir"][0]
+    assert row["path"] == str(new_images) and row["source"] == "setting"
+
+    # A fresh app against the same database picks the change up.
+    from layersmith.api import create_app as rebuild
+    from fastapi.testclient import TestClient as Client
+
+    with Client(rebuild(config.reset_for_tests(**{**client.state["settings"].__dict__,
+                                                  "image_dir": client.state["settings"].data_dir / "images"}))) as web:
+        again = [r for r in web.get("/api/settings").json()["paths"] if r["field"] == "image_dir"][0]
+        assert again["path"] == str(new_images)
+
+
+def test_archives_written_before_a_move_stay_downloadable(client, tmp_path):  # noqa: F811
+    project = client.post("/api/projects", json={
+        "name": "mover", "template": "Minimal",
+        "spec": {"base": {"distribution": "Alpine", "version": "3.22"}}}).json()
+    build = client.post(f"/api/projects/{project['id']}/builds", json={}).json()
+    run_pending_build(client, build["id"])
+    assert client.get(f"/api/builds/{build['id']}/download/export").status_code == 200
+
+    client.put("/api/settings/storage", json={"paths": {"image_dir": str(tmp_path / "new-images")}})
+    assert client.get(f"/api/builds/{build['id']}/download/export").status_code == 200
+
+
+@pytest.mark.parametrize("bad", ["relative/path", "/etc", "/", "/proc/self", "../escape"])
+def test_unsafe_storage_paths_are_refused(client, bad):  # noqa: F811
+    response = client.put("/api/settings/storage", json={"paths": {"image_dir": bad}})
+    assert response.status_code == 422
+
+
+def test_environment_pinned_paths_cannot_be_changed_from_the_ui(client, tmp_path, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("LAYERSMITH_LOG_DIR", str(tmp_path / "pinned-logs"))
+    row = [r for r in client.get("/api/settings").json()["paths"] if r["field"] == "log_dir"][0]
+    assert row["editable"] is False and row["source"] == "environment"
+
+    response = client.put("/api/settings/storage", json={"paths": {"log_dir": str(tmp_path / "other")}})
+    assert response.status_code == 422 and "LAYERSMITH_LOG_DIR" in response.json()["detail"]
+
+
+def test_data_directory_is_not_movable_from_the_ui(client, tmp_path):  # noqa: F811
+    response = client.put("/api/settings/storage", json={"paths": {"data_dir": str(tmp_path / "nope")}})
+    assert response.status_code == 422

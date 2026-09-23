@@ -1,21 +1,38 @@
+import { useEffect, useState } from "react";
 import { api, formatBytes } from "../api";
 import { Banner, Card, Stat, useLoad } from "../components/ui";
 
-const PATH_LABELS: Record<string, [string, string]> = {
-  data: ["Application data", "LAYERSMITH_DATA_DIR"],
-  images: ["Image exports", "LAYERSMITH_IMAGE_DIR"],
-  builds: ["Build workspace", "LAYERSMITH_BUILD_DIR"],
-  uploads: ["Uploaded files", "LAYERSMITH_UPLOAD_DIR"],
-  logs: ["Build logs", "LAYERSMITH_LOG_DIR"],
-  tmp: ["Temporary", "LAYERSMITH_TMP_DIR"],
-};
-
 export default function SettingsPage() {
-  const { data, error, loading } = useLoad(() => api.settings());
+  const { data, error, loading, reload } = useLoad(() => api.settings());
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (data) setEdits(Object.fromEntries(data.paths.map((row) => [row.field, row.path])));
+  }, [data]);
 
   if (error) return <Banner>{error}</Banner>;
   if (loading && !data) return <p className="dim">Loading…</p>;
   if (!data) return null;
+
+  const changed = data.paths.filter((row) => row.editable && edits[row.field] && edits[row.field] !== row.path);
+
+  async function save() {
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      await api.updateStorage(Object.fromEntries(changed.map((row) => [row.field, edits[row.field]])));
+      setSaved(true);
+      reload();
+    } catch (exc) {
+      setSaveError((exc as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
@@ -25,8 +42,14 @@ export default function SettingsPage() {
         <table className="table">
           <tbody>
             <tr><td data-label="Application">Application</td><td>{data.app_name} {data.version}</td></tr>
-            <tr><td data-label="Default architecture">Default architecture</td><td className="mono">{data.default_architecture}</td></tr>
-            <tr><td data-label="Default namespace">Default namespace</td><td className="mono">{data.default_namespace}</td></tr>
+            <tr>
+              <td data-label="Default architecture">Default architecture</td>
+              <td className="mono">{data.default_architecture}</td>
+            </tr>
+            <tr>
+              <td data-label="Default namespace">Default namespace</td>
+              <td className="mono">{data.default_namespace}</td>
+            </tr>
           </tbody>
         </table>
       </Card>
@@ -38,17 +61,11 @@ export default function SettingsPage() {
             {data.build_backend.archive_format}.
           </Banner>
         ) : (
-          <Banner>
-            No usable container runtime, so builds will fail: {data.build_backend.detail}
-          </Banner>
+          <Banner>No usable container runtime, so builds will fail: {data.build_backend.detail}</Banner>
         )}
         <table className="table">
           <thead>
-            <tr>
-              <th>Runtime</th>
-              <th>Status</th>
-              <th>Detail</th>
-            </tr>
+            <tr><th>Runtime</th><th>Status</th><th>Detail</th></tr>
           </thead>
           <tbody>
             {data.build_backend.runtimes.map((runtime) => (
@@ -68,8 +85,7 @@ export default function SettingsPage() {
         <p className="faint">
           <span className="mono">LAYERSMITH_BUILD_BACKEND</span> is{" "}
           <span className="mono">{data.build_backend.selection}</span>: <span className="mono">auto</span> prefers
-          Podman and falls back to Docker, or name one explicitly. See the deployment documentation for running the
-          builder on a separate host.
+          Podman and falls back to Docker, or name one explicitly.
         </p>
       </Card>
 
@@ -79,27 +95,47 @@ export default function SettingsPage() {
           <Stat value={formatBytes(data.storage.used)} label="Used" />
           <Stat value={formatBytes(data.storage.free)} label="Free" />
         </div>
-        <table className="table" style={{ marginTop: "1rem" }}>
-          <thead>
-            <tr>
-              <th>Purpose</th>
-              <th>Path</th>
-              <th>Environment variable</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(data.paths).map(([key, path]) => (
-              <tr key={key}>
-                <td data-label="Purpose">{PATH_LABELS[key]?.[0] ?? key}</td>
-                <td data-label="Path" className="mono">{path}</td>
-                <td data-label="Variable" className="mono faint">{PATH_LABELS[key]?.[1] ?? "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="faint">
-          Paths are set at startup and are created if missing. Nothing is deleted automatically.
+
+        {saveError && <Banner>{saveError}</Banner>}
+        {saved && changed.length === 0 && <Banner kind="info">Saved. New data is written to the new paths.</Banner>}
+
+        <p className="faint" style={{ marginTop: "1rem" }}>
+          Where new data is written. Changing a path does not move files that already exist, and archives written
+          earlier stay downloadable.
         </p>
+
+        {data.paths.map((row) => (
+          <div className="field" key={row.field}>
+            <label htmlFor={row.field}>
+              {row.label}{" "}
+              <span className="faint mono">{row.variable}</span>
+              {row.source === "environment" && <span className="pill queued" style={{ marginLeft: 8 }}>from environment</span>}
+              {row.source === "setting" && <span className="pill running" style={{ marginLeft: 8 }}>changed</span>}
+            </label>
+            <input
+              id={row.field}
+              className="mono"
+              value={edits[row.field] ?? row.path}
+              disabled={!row.editable}
+              onChange={(event) => setEdits({ ...edits, [row.field]: event.target.value })}
+            />
+            {row.note && <div className="field-hint">{row.note}</div>}
+          </div>
+        ))}
+
+        <div className="row end">
+          {changed.length > 0 && (
+            <button
+              className="ghost"
+              onClick={() => setEdits(Object.fromEntries(data.paths.map((r) => [r.field, r.path])))}
+            >
+              Reset
+            </button>
+          )}
+          <button className="primary" onClick={save} disabled={saving || changed.length === 0}>
+            {saving ? "Saving…" : changed.length ? `Save ${changed.length} path${changed.length > 1 ? "s" : ""}` : "Save"}
+          </button>
+        </div>
       </Card>
     </>
   );

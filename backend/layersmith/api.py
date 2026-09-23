@@ -34,6 +34,7 @@ from layersmith.core.spec import (
 from layersmith.models import (
     Blob, Build, Project, create_all, make_engine, make_session_factory, next_build_number, utcnow,
 )
+from layersmith.services import storage
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 
 router = APIRouter(prefix="/api")
@@ -68,6 +69,10 @@ class ImportIn(BaseModel):
 
 class CloneIn(BaseModel):
     name: str
+
+
+class StorageIn(BaseModel):
+    paths: dict[str, str]
 
 
 # ------------------------------------------------------------- helpers
@@ -126,11 +131,16 @@ def _prepare_spec(payload_spec: dict, template: str) -> dict:
     return validate_spec(merged)
 
 
-def _safe_download(path_value: str | None, allowed_dir: Path) -> Path:
+def _safe_download(path_value: str | None, allowed_dirs: list[Path]) -> Path:
+    """Serve a recorded archive, and only from a directory LayerSmith writes to.
+
+    More than one directory is allowed because the image path is editable: an
+    archive written before a change still lives in the previous directory.
+    """
     if not path_value:
         raise HTTPException(404, "Nothing to download")
     path = Path(path_value).resolve()
-    if not str(path).startswith(str(Path(allowed_dir).resolve()) + "/") or not path.is_file():
+    if not path.is_file() or not any(path.is_relative_to(Path(d).resolve()) for d in allowed_dirs):
         raise HTTPException(404, "File is no longer available")
     return path
 
@@ -161,9 +171,11 @@ def get_catalog():
 
 
 @router.get("/settings")
-def get_settings():
+def get_settings(state=Depends(get_state)):
     app_settings = config.settings()
     usage = shutil.disk_usage(app_settings.data_dir)
+    with state["session_factory"]() as session:
+        path_rows = storage.describe(session, app_settings)
     backend = make_backend(app_settings)
     available, detail = backend.available()
     return {
@@ -174,13 +186,23 @@ def get_settings():
                           "available": available, "detail": detail,
                           "archive_format": backend.archive_format,
                           "runtimes": probe_all(app_settings)},
-        "paths": {
-            "data": str(app_settings.data_dir), "images": str(app_settings.image_dir),
-            "builds": str(app_settings.build_dir), "uploads": str(app_settings.upload_dir),
-            "logs": str(app_settings.log_dir), "tmp": str(app_settings.tmp_dir),
-        },
+        "paths": path_rows,
         "storage": {"total": usage.total, "used": usage.used, "free": usage.free},
     }
+
+
+@router.put("/settings/storage")
+def update_storage(payload: StorageIn, state=Depends(get_state)):
+    """Change where new data is written. Existing files are left where they are."""
+    app_settings = config.settings()
+    with state["session_factory"]() as session:
+        try:
+            storage.save(session, app_settings, payload.paths)
+        except storage.StorageError as exc:
+            raise HTTPException(422, str(exc))
+        except RuntimeError as exc:  # prepare() refused a directory
+            raise HTTPException(422, str(exc))
+        return {"paths": storage.describe(session, app_settings)}
 
 
 @router.get("/stats")
@@ -396,8 +418,9 @@ def download(build_id: str, kind: str, state=Depends(get_state)):
         build = session.get(Build, build_id)
         if build is None:
             raise HTTPException(404, "Build not found")
+        settings = config.settings()
         path = _safe_download(build.export_path if kind == "export" else build.airgap_path,
-                              config.settings().image_dir)
+                              [settings.image_dir, *storage.previous_image_dirs(session)])
         return FileResponse(path, filename=path.name, media_type="application/octet-stream")
 
 
@@ -445,10 +468,15 @@ def preview(payload: ProjectIn):
 
 def create_app(settings=None) -> FastAPI:
     settings = settings or config.settings()
-    settings.prepare()
+    # The data directory must exist before the database in it can be opened;
+    # the rest may have been moved by an administrator, so read those first.
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     engine = make_engine(settings.database_url)
     create_all(engine)
     session_factory = make_session_factory(engine)
+    with session_factory() as session:
+        settings.apply_overrides(storage.load(session))
+    settings.prepare()
     backend = make_backend(settings)
     service = BuildService(session_factory, backend, settings=settings)
 

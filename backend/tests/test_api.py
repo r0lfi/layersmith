@@ -160,7 +160,11 @@ def test_download_refuses_paths_outside_the_image_directory(client):
 def test_settings_reports_paths_and_backend_state(client):
     body = client.get("/api/settings").json()
     assert body["app_name"] == "LayerSmith" and body["tagline"]
-    assert set(body["paths"]) == {"data", "images", "builds", "uploads", "logs", "tmp"}
+    fields = {row["field"] for row in body["paths"]}
+    assert fields == {"data_dir", "image_dir", "build_dir", "upload_dir", "log_dir", "tmp_dir"}
+    # The data directory holds the database, so it is never editable here.
+    assert [row["editable"] for row in body["paths"] if row["field"] == "data_dir"] == [False]
+    assert all(row["path"].startswith("/") for row in body["paths"])
     assert body["storage"]["total"] > 0 and "available" in body["build_backend"]
 
 

@@ -98,7 +98,15 @@ export interface Settings {
     archive_format: string;
     runtimes: { name: string; available: boolean; detail: string }[];
   };
-  paths: Record<string, string>;
+  paths: {
+    field: string;
+    label: string;
+    path: string;
+    variable: string;
+    editable: boolean;
+    source: "default" | "environment" | "setting";
+    note: string;
+  }[];
   storage: { total: number; used: number; free: number };
 }
 
@@ -134,6 +142,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   catalog: () => request<Catalog>("/catalog"),
   settings: () => request<Settings>("/settings"),
+  updateStorage: (paths: Record<string, string>) =>
+    request<{ paths: Settings["paths"] }>("/settings/storage", { method: "PUT", body: JSON.stringify({ paths }) }),
   stats: () => request<Stats>("/stats"),
 
   projects: () => request<Project[]>("/projects"),

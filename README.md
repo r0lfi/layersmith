@@ -60,12 +60,20 @@ and the builder on separate hosts.
 
 ## Configuration
 
-Every path is configurable; the defaults live under one data directory so a
-container needs a single volume.
+Every path is configurable. The default is one data directory so a container
+needs a single volume mount; a native install usually points it at
+`/var/lib/layersmith`. (`/opt` is for the application's own files under the
+FHS, not for the data it writes.)
+
+The five paths below the data directory are also editable in **Settings →
+Storage** at runtime, and the change is stored in the database. A path set
+through the environment wins and is shown read-only, so deployment decisions
+stay with whoever wrote the unit or compose file. Changing a path does not
+move existing files; archives written earlier stay downloadable.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LAYERSMITH_DATA_DIR` | `/data` | Base directory for everything below |
+| `LAYERSMITH_DATA_DIR` | `/data` | Base directory for everything below (holds the database) |
 | `LAYERSMITH_IMAGE_DIR` | `$DATA/images` | Exported archives and air-gap bundles |
 | `LAYERSMITH_BUILD_DIR` | `$DATA/builds` | Build contexts |
 | `LAYERSMITH_UPLOAD_DIR` | `$DATA/uploads` | Uploaded files and tool binaries |

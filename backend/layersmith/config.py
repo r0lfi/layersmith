@@ -19,8 +19,26 @@ TAGLINE = "Build container images with purpose."
 VERSION = "0.1.0"
 
 
+#: Paths an administrator may change at runtime, with their environment
+#: variable. The data directory and the database are deliberately absent: the
+#: settings themselves live there, so moving them is an operator task, done by
+#: changing the volume or the variable and restarting.
+MOVABLE_PATHS = {
+    "image_dir": "LAYERSMITH_IMAGE_DIR",
+    "build_dir": "LAYERSMITH_BUILD_DIR",
+    "upload_dir": "LAYERSMITH_UPLOAD_DIR",
+    "log_dir": "LAYERSMITH_LOG_DIR",
+    "tmp_dir": "LAYERSMITH_TMP_DIR",
+}
+
+
 def _path(name: str, default: Path) -> Path:
     return Path(os.environ.get(name, str(default))).expanduser()
+
+
+def pinned_by_environment() -> set[str]:
+    """Movable paths the operator set explicitly; the UI must not override them."""
+    return {field for field, variable in MOVABLE_PATHS.items() if os.environ.get(variable)}
 
 
 @dataclass
@@ -42,6 +60,13 @@ class Settings:
     agent_url: str
     agent_token: str
     static_dir: Path | None
+
+    def apply_overrides(self, overrides: dict) -> None:
+        """Apply administrator-set paths, ignoring any pinned by the environment."""
+        pinned = pinned_by_environment()
+        for field, value in (overrides or {}).items():
+            if field in MOVABLE_PATHS and field not in pinned and value:
+                setattr(self, field, Path(value))
 
     @property
     def directories(self) -> list[Path]:

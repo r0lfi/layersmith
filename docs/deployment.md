@@ -30,6 +30,9 @@ LAYERSMITH_DATA_DIR=/var/lib/layersmith \
   /opt/layersmith/venv/bin/uvicorn layersmith.api:create_app --factory --host 0.0.0.0 --port 8080
 ```
 
+The application lives in `/opt`, its data in `/var/lib`, following the FHS.
+In a container both collapse into the single `/data` volume.
+
 Builds run as that user, with that user's Podman storage. No privileged
 access is involved. This is the recommended setup for a single admin host.
 
@@ -103,6 +106,16 @@ gives you, use option 3.
 | `LAYERSMITH_UPLOAD_DIR` | `$DATA/uploads` | uploaded files, one copy per checksum |
 | `LAYERSMITH_LOG_DIR` | `$DATA/logs` | one log file per build |
 | `LAYERSMITH_TMP_DIR` | `$DATA/tmp` | scratch space while bundling |
+
+Everything except the data directory itself is also editable in **Settings →
+Storage**, stored in the database and applied without a restart. A path set
+through the environment cannot be changed there. Moving a path affects new
+data only: existing files stay where they were written, and LayerSmith
+remembers previous image directories so earlier archives still download.
+
+The data directory is deliberately not editable from the UI, because the
+database holding that setting lives in it. Move it by changing the volume or
+`LAYERSMITH_DATA_DIR` and restarting.
 
 Exports are the big item: an archive is roughly the size of the image. Images
 themselves live in the container runtime's storage, not in `$DATA`. Nothing
