@@ -15,6 +15,9 @@ import re
 from layersmith.core import catalog
 
 MAX_SCRIPT = 64 * 1024
+#: Upper bound independent of configuration; the configurable limit in
+#: config.max_files_per_image may be lower, never higher.
+MAX_ENTRIES = 100
 SCRIPT_KEYS = ("pre_build", "post_install", "entrypoint")
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -152,6 +155,8 @@ def validate_spec(spec):
         if tool["architecture"] != spec["architecture"]:
             raise InvalidSpec(f"Tool {tool['name']} is {tool['architecture']}, the image is {spec['architecture']}")
 
+    if len(spec.get("files") or []) + len(spec.get("tools") or []) > MAX_ENTRIES:
+        raise InvalidSpec(f"An image may reference at most {MAX_ENTRIES} files and tools")
     for item in spec.setdefault("files", []):
         check(SHA256_RE, item.get("sha256"), "file (upload it first)")
         check_path(item.get("destination"), "file destination")

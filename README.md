@@ -155,6 +155,9 @@ Everything is optional; see [.env.example](.env.example) for the full list.
 | `LAYERSMITH_BUILD_BACKEND` | `auto` | `auto`, `podman` or `docker` |
 | `LAYERSMITH_DEFAULT_ARCH` | `amd64` | Architecture offered first |
 | `LAYERSMITH_DEFAULT_NAMESPACE` | `layersmith` | Namespace for new image names |
+| `LAYERSMITH_MAX_UPLOAD_BYTES` | 512 MiB | Largest accepted upload |
+| `LAYERSMITH_MAX_FILES_PER_IMAGE` | `100` | Files and tools one image may reference |
+| `LAYERSMITH_MAX_CONTEXT_BYTES` | 2 GiB | Largest build context |
 
 The five paths under the data directory are also editable at runtime in
 **Settings → Storage**. A value set in the environment wins and is shown
@@ -200,6 +203,10 @@ LayerSmith runs build jobs, so it is treated as security-sensitive:
 - Environment variables that look like credentials are refused: secrets must
   not be baked into an image.
 - Downloads are limited to directories LayerSmith itself writes to.
+- Uploaded files are refused if they are links, and a build context is
+  bounded in file count and total size.
+- An unknown `/api/` path answers as the API, so a mistyped endpoint cannot
+  be mistaken for a working one.
 
 **Deliberate boundaries**, in full in
 [docs/deployment.md](docs/deployment.md): no built-in authentication (run it

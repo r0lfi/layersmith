@@ -193,6 +193,7 @@ class BuildService:
         (context / "tools").mkdir(parents=True, exist_ok=True)
         (context / "scripts").mkdir(parents=True, exist_ok=True)
         (context / "Containerfile").write_text(build.containerfile, encoding="utf-8")
+        total = 0
 
         for path, kind, source in cf.context_plan(build.spec or {}):
             target = context / path
@@ -201,11 +202,23 @@ class BuildService:
                 target.chmod(0o755)
             else:
                 blob = Path(self.settings.upload_dir) / source
+                # is_symlink before is_file: a symlink pointing at a host file
+                # would otherwise be copied into the build context. The
+                # checksum check below would catch it too, but refusing the
+                # link outright is the boundary we actually mean.
+                if blob.is_symlink():
+                    raise BuildError(f"Uploaded file {source[:12]}… is a link, which is not accepted")
                 if not blob.is_file():
                     raise BuildError(f"Uploaded file {source[:12]}… is missing from storage")
                 if sha256_file(blob) != source:
                     raise BuildError(f"Uploaded file {source[:12]}… failed its checksum check")
-                shutil.copy2(blob, target)
+                total += blob.stat().st_size
+                if total > self.settings.max_context_bytes:
+                    raise BuildError(
+                        f"Build context is larger than "
+                        f"{self.settings.max_context_bytes // (1024 * 1024)} MiB"
+                    )
+                shutil.copy2(blob, target, follow_symlinks=False)
         return context
 
     # --------------------------------------------------------------- run

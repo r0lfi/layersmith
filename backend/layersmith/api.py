@@ -499,6 +499,11 @@ def create_app(settings=None) -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa(full_path: str):
+            # An unknown API path must answer as the API, not as the web app:
+            # otherwise a typo (or a client that collapsed "../.." before
+            # sending) gets index.html with 200 instead of a JSON 404.
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(404, "Not found")
             candidate = (root / full_path).resolve()
             # is_relative_to, not startswith: "/srv/static" must not match a
             # sibling "/srv/static-private".

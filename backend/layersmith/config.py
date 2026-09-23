@@ -63,6 +63,8 @@ class Settings:
     default_architecture: str
     default_namespace: str
     max_upload_bytes: int
+    max_files_per_image: int
+    max_context_bytes: int
     keep_build_contexts: bool
     agent_url: str
     agent_token: str
@@ -110,6 +112,10 @@ def load() -> Settings:
         default_architecture=os.environ.get("LAYERSMITH_DEFAULT_ARCH", "amd64"),
         default_namespace=os.environ.get("LAYERSMITH_DEFAULT_NAMESPACE", "layersmith"),
         max_upload_bytes=int(os.environ.get("LAYERSMITH_MAX_UPLOAD_BYTES", 512 * 1024 * 1024)),
+        # Bounds on what one image definition can drag into a build, so a
+        # single project cannot fill the data volume.
+        max_files_per_image=int(os.environ.get("LAYERSMITH_MAX_FILES_PER_IMAGE", 100)),
+        max_context_bytes=int(os.environ.get("LAYERSMITH_MAX_CONTEXT_BYTES", 2 * 1024 * 1024 * 1024)),
         keep_build_contexts=os.environ.get("LAYERSMITH_KEEP_BUILD_CONTEXTS", "").lower() in ("1", "true", "yes"),
         agent_url=os.environ.get("LAYERSMITH_AGENT_URL", ""),
         agent_token=os.environ.get("LAYERSMITH_AGENT_TOKEN", ""),
