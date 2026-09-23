@@ -1,0 +1,24 @@
+# LayerSmith - single service, one volume.
+#
+# Building images needs a container runtime. The default setup talks to a
+# Podman socket on the host, which keeps the build outside this container
+# instead of granting it privileged access. See docs/deployment.md for the
+# alternatives, including a separate build host.
+services:
+  layersmith:
+    image: ghcr.io/example/layersmith:latest
+    container_name: layersmith
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      LAYERSMITH_DATA_DIR: /data
+      # Points at the mounted Podman socket below.
+      CONTAINER_HOST: unix:///run/podman/podman.sock
+    volumes:
+      - layersmith-data:/data
+      # Rootless Podman socket from the host (systemctl --user start podman.socket):
+      - ${XDG_RUNTIME_DIR}/podman/podman.sock:/run/podman/podman.sock
+
+volumes:
+  layersmith-data:

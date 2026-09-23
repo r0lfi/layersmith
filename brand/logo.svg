@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 72" width="320" height="72" role="img" aria-label="LayerSmith - Build container images with purpose.">
+  <title>LayerSmith</title>
+  <defs>
+    <linearGradient id="lsw-top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="lsw-mid" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+    <linearGradient id="lsw-base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e7490"/>
+      <stop offset="1" stop-color="#155e75"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(4 4) scale(0.875)">
+    <path d="M32 6 58 19 32 32 6 19Z" fill="url(#lsw-top)"/>
+    <path d="M6 26 32 39 58 26 58 30 32 43 6 30Z" fill="url(#lsw-mid)"/>
+    <path d="M6 37 32 50 58 37 58 41 32 54 6 41Z" fill="url(#lsw-base)"/>
+    <path d="M44 9.5 46.6 14.3 51.4 11.7 48.8 16.5 53.6 19.1 48.2 19.1 48.2 24 45.6 19.2 40.8 21.8 43.4 17 38.6 14.4 44 14.4Z"
+          fill="#e0f2fe" opacity="0.9"/>
+  </g>
+
+  <g font-family="'Inter','Segoe UI',system-ui,-apple-system,sans-serif">
+    <text x="76" y="40" font-size="30" font-weight="650" letter-spacing="-0.4" fill="#e2e8f0">Layer<tspan fill="#22d3ee">Smith</tspan></text>
+    <text x="77" y="57" font-size="11.5" letter-spacing="0.6" fill="#64748b">by xnett.org</text>
+  </g>
+</svg>

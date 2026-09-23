@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+node_modules/
+frontend/dist/
+data/
+*.db
+*.tar
+*.tar.gz
+.DS_Store
