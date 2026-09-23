@@ -34,6 +34,7 @@ from layersmith.core.spec import (
 from layersmith.models import (
     Blob, Build, Project, create_all, make_engine, make_session_factory, next_build_number, utcnow,
 )
+from layersmith import scanners
 from layersmith.services import storage
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 
@@ -189,9 +190,22 @@ def get_settings(state=Depends(get_state)):
                           "available": available, "detail": detail,
                           "archive_format": backend.archive_format,
                           "runtimes": probe_all(app_settings)},
+        "scanner": scanners.describe(app_settings),
         "paths": path_rows,
         "storage": {"total": usage.total, "used": usage.used, "free": usage.free},
     }
+
+
+@router.get("/scanner")
+def scanner_status(state=Depends(get_state)):
+    """Scanner status, including what it would actually be asked to look for."""
+    app_settings = config.settings()
+    status = scanners.describe(app_settings)
+    scanner = scanners.make_scanner(app_settings)
+    status["health"] = scanner.health()
+    status["scan_kinds"] = [kind for kind in app_settings.scan_kinds if kind in scanner.supported_kinds]
+    status["generate_sbom"] = app_settings.generate_sbom and scanner.supports_sbom
+    return status
 
 
 @router.put("/settings/storage")

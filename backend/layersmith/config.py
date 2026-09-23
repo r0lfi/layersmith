@@ -39,8 +39,34 @@ MOVABLE_PATHS = {
 }
 
 
+#: Scanner variables that configure LayerSmith itself rather than a specific
+#: scanner; everything else under LAYERSMITH_SCANNER_ is handed to the scanner.
+RESERVED_SCANNER_VARS = {"LAYERSMITH_SCANNER", "LAYERSMITH_SCANNER_TIMEOUT"}
+
+TRUE_VALUES = ("1", "true", "yes", "on")
+
+
 def _path(name: str, default: Path) -> Path:
     return Path(os.environ.get(name, str(default))).expanduser()
+
+
+def _flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    return default if value is None else value.strip().lower() in TRUE_VALUES
+
+
+def _scanner_options() -> dict[str, str]:
+    """LAYERSMITH_SCANNER_<KEY> variables, for the scanner backend to read.
+
+    Scanner-specific settings are passed through as a plain mapping so the
+    rest of LayerSmith never has to learn any one scanner's option names.
+    """
+    prefix = "LAYERSMITH_SCANNER_"
+    return {
+        name[len(prefix):].lower(): value
+        for name, value in os.environ.items()
+        if name.startswith(prefix) and name not in RESERVED_SCANNER_VARS
+    }
 
 
 def pinned_by_environment() -> set[str]:
@@ -66,6 +92,12 @@ class Settings:
     max_files_per_image: int
     max_context_bytes: int
     keep_build_contexts: bool
+    scanner: str
+    scan_after_build: bool
+    scan_kinds: tuple[str, ...]
+    generate_sbom: bool
+    scanner_timeout: int
+    scanner_options: dict[str, str]
     agent_url: str
     agent_token: str
     static_dir: Path | None
@@ -116,7 +148,19 @@ def load() -> Settings:
         # single project cannot fill the data volume.
         max_files_per_image=int(os.environ.get("LAYERSMITH_MAX_FILES_PER_IMAGE", 100)),
         max_context_bytes=int(os.environ.get("LAYERSMITH_MAX_CONTEXT_BYTES", 2 * 1024 * 1024 * 1024)),
-        keep_build_contexts=os.environ.get("LAYERSMITH_KEEP_BUILD_CONTEXTS", "").lower() in ("1", "true", "yes"),
+        keep_build_contexts=_flag("LAYERSMITH_KEEP_BUILD_CONTEXTS", False),
+        # auto: scan if a scanner is reachable, otherwise do not. See
+        # scanners/__init__.py. Scanning reports; it never blocks a build.
+        scanner=os.environ.get("LAYERSMITH_SCANNER", "auto"),
+        scan_after_build=_flag("LAYERSMITH_SCAN_AFTER_BUILD", True),
+        scan_kinds=tuple(
+            kind.strip().lower()
+            for kind in os.environ.get("LAYERSMITH_SCAN_KINDS", "vulnerability,secret").split(",")
+            if kind.strip()
+        ),
+        generate_sbom=_flag("LAYERSMITH_GENERATE_SBOM", True),
+        scanner_timeout=int(os.environ.get("LAYERSMITH_SCANNER_TIMEOUT", 600)),
+        scanner_options=_scanner_options(),
         agent_url=os.environ.get("LAYERSMITH_AGENT_URL", ""),
         agent_token=os.environ.get("LAYERSMITH_AGENT_TOKEN", ""),
         # Where the built web UI lives. Defaults to ./static next to the

@@ -79,6 +79,8 @@ and shows you the Containerfile it produced before anything is built.
 - **OCI TAR export** with a recorded SHA256.
 - **Air-gap bundles** — image, manifest, source Containerfile, `SHA256SUMS`
   and `INSTALL.txt` in one archive that loads with no network access.
+- **Optional image scanning** — pluggable, off until you configure a scanner,
+  and it reports rather than blocks. See [docs/scanning.md](docs/scanning.md).
 - **Podman or Docker** as the build backend.
 - **API first** — the web UI uses the same HTTP API you can script against.
 
@@ -158,6 +160,10 @@ Everything is optional; see [.env.example](.env.example) for the full list.
 | `LAYERSMITH_MAX_UPLOAD_BYTES` | 512 MiB | Largest accepted upload |
 | `LAYERSMITH_MAX_FILES_PER_IMAGE` | `100` | Files and tools one image may reference |
 | `LAYERSMITH_MAX_CONTEXT_BYTES` | 2 GiB | Largest build context |
+| `LAYERSMITH_SCANNER` | `auto` | Image scanner: `auto`, `none`, or a scanner name |
+| `LAYERSMITH_SCAN_AFTER_BUILD` | `1` | Scan each image once it is built |
+| `LAYERSMITH_SCAN_KINDS` | `vulnerability,secret` | What a scan looks for |
+| `LAYERSMITH_GENERATE_SBOM` | `1` | Produce a CycloneDX SBOM with a scan |
 
 The five paths under the data directory are also editable at runtime in
 **Settings → Storage**. A value set in the environment wins and is shown
@@ -190,6 +196,9 @@ Back up the volume the ordinary way; `/data` is all there is.
   `build`, `inspect`, `export`, `remove`) with Podman and Docker
   implementations, so a remote build agent can be added without touching the
   rest.
+- **Scanners** — the same arrangement for image scanning (`available`,
+  `health`, `version`, `database_info`, `scan_image`, `generate_sbom`), with
+  no scanner configured by default.
 
 ## Security
 
@@ -207,6 +216,11 @@ LayerSmith runs build jobs, so it is treated as security-sensitive:
   bounded in file count and total size.
 - An unknown `/api/` path answers as the API, so a mistyped endpoint cannot
   be mistaken for a working one.
+- Image scanning, when configured, is handed an exported archive rather than
+  the container runtime's socket.
+
+An image LayerSmith has not scanned is reported as unknown, never as clean;
+see [docs/scanning.md](docs/scanning.md).
 
 **Deliberate boundaries**, in full in
 [docs/deployment.md](docs/deployment.md): no built-in authentication (run it

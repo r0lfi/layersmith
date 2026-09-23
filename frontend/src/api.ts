@@ -102,6 +102,18 @@ export interface Settings {
     archive_format: string;
     runtimes: { name: string; available: boolean; detail: string }[];
   };
+  scanner: {
+    name: string;
+    selection: string;
+    available: boolean;
+    detail: string;
+    version: string;
+    supported_kinds: string[];
+    supports_sbom: boolean;
+    scan_after_build: boolean;
+    database: { version: string | null; updated_at: string | null; offline: boolean; detail: string };
+    scanners: { name: string; available: boolean; detail: string }[];
+  };
   paths: {
     field: string;
     label: string;

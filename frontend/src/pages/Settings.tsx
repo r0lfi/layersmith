@@ -117,6 +117,53 @@ export default function SettingsPage() {
         </p>
       </Card>
 
+      <Card title="Security">
+        {data.scanner.available ? (
+          <Banner kind="info">
+            Scanning with <strong>{data.scanner.name}</strong>
+            {data.scanner.version && <> {data.scanner.version}</>}.{" "}
+            {data.scanner.scan_after_build
+              ? "Images are scanned automatically after every build."
+              : "Automatic scanning after a build is switched off."}
+          </Banner>
+        ) : (
+          <Banner>
+            Images are not scanned. Nothing is known about their vulnerabilities — an unscanned image is
+            unknown, not clean. {data.scanner.detail}
+          </Banner>
+        )}
+        <table className="table">
+          <thead>
+            <tr><th>Scanner</th><th>Status</th><th>Detail</th></tr>
+          </thead>
+          <tbody>
+            {data.scanner.scanners.map((scanner) => (
+              <tr key={scanner.name}>
+                <td data-label="Scanner">
+                  <span className="mono">{scanner.name}</span>
+                  {scanner.name === data.scanner.name && (
+                    <span className="pill ready" style={{ marginLeft: 8 }}>in use</span>
+                  )}
+                </td>
+                <td data-label="Status">{scanner.available ? "available" : "not available"}</td>
+                <td data-label="Detail" className="faint">{scanner.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.scanner.available && data.scanner.database.detail && (
+          <p className="faint">
+            Vulnerability data: {data.scanner.database.detail}
+            {data.scanner.database.offline && " (imported offline)"}
+          </p>
+        )}
+        <p className="faint">
+          <span className="mono">LAYERSMITH_SCANNER</span> is{" "}
+          <span className="mono">{data.scanner.selection}</span>: <span className="mono">auto</span> uses a scanner
+          when one is reachable. Scanning reports; it never blocks a build.
+        </p>
+      </Card>
+
       <Card title="Storage">
         <div className="grid stats">
           <Stat value={formatBytes(data.storage.total)} label="Disk" />
