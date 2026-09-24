@@ -119,6 +119,9 @@ class BuildService:
         self.logs = log_bus or LogBus()
         self._queue: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
+        #: Called with a build id once an image is ready. The application
+        #: wires scanning in here; the build pipeline knows nothing about it.
+        self.on_built = None
 
     # ------------------------------------------------------------- queue
 
@@ -275,6 +278,11 @@ class BuildService:
 
             self._emit(build_id, f"Image ready: {reference} ({size / 1e6:.1f} MB archive, sha256:{checksum[:12]}…)")
             self.logs.publish(build_id, {"type": "done", "status": "ready"})
+            if self.on_built is not None:
+                try:
+                    self.on_built(build_id)
+                except Exception as exc:  # a post-build step never fails a build
+                    self._emit(build_id, f"NOTE: post-build step did not run: {exc}")
         except BuildError as exc:
             self._fail(build_id, str(exc))
         except Exception as exc:

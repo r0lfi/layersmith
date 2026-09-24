@@ -8,7 +8,7 @@ implying they were found clean. An unscanned image is unknown, not safe.
 from pathlib import Path
 
 from layersmith.scanners.base import (
-    INPUT_IMAGE_ARCHIVE, DatabaseInfo, LogSink, ScanResult, SbomResult, ScannerUnavailable,
+    DOCKER_ARCHIVE, INPUT_IMAGE_ARCHIVE, DatabaseInfo, LogSink, ScanResult, SbomResult, ScannerUnavailable,
 )
 
 NOT_CONFIGURED = (
@@ -22,6 +22,7 @@ class NoneScanner:
 
     name = "none"
     input_kind = INPUT_IMAGE_ARCHIVE
+    archive_formats = (DOCKER_ARCHIVE,)
     supported_kinds: tuple[str, ...] = ()
     supports_sbom = False
 

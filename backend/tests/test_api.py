@@ -13,6 +13,9 @@ def client(tmp_path):
         data_dir=tmp_path, image_dir=tmp_path / "images", build_dir=tmp_path / "builds",
         upload_dir=tmp_path / "uploads", log_dir=tmp_path / "logs", tmp_dir=tmp_path / "tmp",
         database_url=f"sqlite:///{tmp_path}/test.db",
+        # Deterministic regardless of what the host running the tests has
+        # installed; scanner selection is covered in test_scanners.py.
+        scanner="none",
     )
     app = create_app(settings)
     service = app.state.layersmith["build_service"]
@@ -161,7 +164,7 @@ def test_settings_reports_paths_and_backend_state(client):
     body = client.get("/api/settings").json()
     assert body["app_name"] == "LayerSmith" and body["tagline"]
     fields = {row["field"] for row in body["paths"]}
-    assert fields == {"data_dir", "image_dir", "build_dir", "upload_dir", "log_dir", "tmp_dir"}
+    assert fields == {"data_dir", "image_dir", "build_dir", "upload_dir", "log_dir", "tmp_dir", "scan_dir"}
     # The data directory holds the database, so it is never editable here.
     assert [row["editable"] for row in body["paths"] if row["field"] == "data_dir"] == [False]
     assert all(row["path"].startswith("/") for row in body["paths"])

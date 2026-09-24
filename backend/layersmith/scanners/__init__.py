@@ -20,10 +20,12 @@ from layersmith.scanners.base import (  # noqa: F401
     DatabaseInfo, Finding, SbomResult, ScanResult, ScannerBackend, ScannerError, ScannerUnavailable,
 )
 from layersmith.scanners.none import NoneScanner
+from layersmith.scanners.trivy import TrivyScanner
 
 #: name -> factory taking Settings. Order is the `auto` preference order;
 #: `none` is the fallback and is never chosen by preference.
 SCANNERS = {
+    "trivy": lambda settings: TrivyScanner(settings),
     "none": lambda settings: NoneScanner(),
 }
 

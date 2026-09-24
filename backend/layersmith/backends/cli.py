@@ -26,6 +26,9 @@ class CliBackend:
     name = "cli"
     #: Archive format produced by `export`; both runtimes can load either.
     archive_format = "oci-archive"
+    #: Every format this runtime can write, for callers that need a specific
+    #: one - a scanner, for instance, that cannot read an oci-archive tar.
+    archive_formats = ("oci-archive",)
 
     def __init__(self, binary: str, timeout: int = 3 * 60 * 60):
         self.binary = binary
@@ -39,7 +42,7 @@ class CliBackend:
     def _build_args(self, architecture: str) -> list[str]:
         raise NotImplementedError
 
-    def _save_args(self, destination: Path) -> list[str]:
+    def _save_args(self, destination: Path, archive_format: str) -> list[str]:
         raise NotImplementedError
 
     def load_command(self, archive_name: str) -> str:
@@ -122,10 +125,14 @@ class CliBackend:
         return ImageInfo(reference=image_ref, image_id=data.get("Id"), digest=self._digest_of(data),
                          size=data.get("Size"), labels=(data.get("Labels") or data.get("Config", {}).get("Labels") or {}))
 
-    def export(self, image_ref: str, destination, on_log: LogSink) -> int:
+    def export(self, image_ref: str, destination, on_log: LogSink, archive_format: str | None = None) -> int:
         destination = Path(destination)
+        archive_format = archive_format or self.archive_format
+        if archive_format not in self.archive_formats:
+            raise BuildError(f"{self.name} cannot write a {archive_format}")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        self._run(["save", *self._save_args(destination), image_ref], on_log=on_log, timeout=60 * 60)
+        self._run(["save", *self._save_args(destination, archive_format), image_ref],
+                  on_log=on_log, timeout=60 * 60)
         if not destination.is_file() or destination.stat().st_size == 0:
             raise BuildError("Export produced no archive")
         return destination.stat().st_size

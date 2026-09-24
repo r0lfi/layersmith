@@ -56,8 +56,10 @@ I/O it saves. So:
 - The scanner container gets **no runtime socket** by default, no
   `--privileged`, and no host filesystem mounts beyond the one archive.
 - If LayerSmith already holds an export for the **exact same image digest**,
-  that file is reused. The digest association is verified first, so a replaced
-  or stale archive cannot be scanned in place of the image it claims to be.
+  and the scanner can read that archive format, the file is reused. The
+  association is re-verified by checksum first, so an archive that was
+  replaced, truncated or written by another build is never scanned in place
+  of the image it claims to be.
 - Otherwise a **temporary** export is made, scanned, and deleted — on success
   and on failure alike. Requesting a scan never leaves a permanent "Download
   TAR" behind.
@@ -72,11 +74,101 @@ remote agent — declares `image_reference` and inherits none of this machinery.
 
 ## Secrets
 
-Secret detection reports *that* something matched, never the value. Matches are
-masked before they are stored, and scan results are not written into build
-logs, manifests, SBOMs or air-gap bundles as plaintext. LayerSmith also refuses
-environment variables that look like credentials at build time: an image should
-not contain a secret to be found in the first place.
+Secret detection reports *that* something matched, never the value. A finding
+carries the rule, the file and the line, and a note of the match's length -
+nothing more.
+
+Two places in a scanner's output carry values, and LayerSmith strips both
+before anything is stored:
+
+* the secret findings themselves, and
+* the image's build history (`Metadata.ImageConfig`), which holds every RUN
+  command and therefore any secret passed on one. LayerSmith already records
+  the Containerfile it built from, so nothing is lost by dropping it.
+
+The stored report is written to disk, served through the API and goes into
+air-gap bundles, so this matters more than it might appear.
+
+LayerSmith also refuses environment variables that look like credentials at
+build time: an image should not contain a secret to be found in the first
+place.
+
+## Trivy
+
+Trivy is the scanner LayerSmith ships support for. It is **never installed
+into the LayerSmith application image**; it runs either as its own container
+or as a binary on the host.
+
+Enable it by pulling the image on the machine that builds:
+
+```bash
+docker pull ghcr.io/aquasecurity/trivy:0.74.0   # or podman pull
+```
+
+That is the whole opt-in. `LAYERSMITH_SCANNER=auto` picks it up, and
+**Settings → Security** shows it as available. LayerSmith deliberately does
+not pull several hundred megabytes on its own.
+
+The scan container is started like this - and nothing else is added:
+
+```
+<runtime> run --rm \
+  --security-opt no-new-privileges \
+  --cap-drop ALL \
+  -v layersmith-trivy-db:/root/.cache \
+  -v <archive>:/scan/image:ro,z \
+  ghcr.io/aquasecurity/trivy:0.74.0 image --input /scan/image ...
+```
+
+No socket. No `--privileged`. No host directories. The `z` (shared) SELinux
+relabel is deliberate: `Z` would give the archive a private label and make a
+reused export unreadable to LayerSmith itself.
+
+LayerSmith starts that container through the runtime it already uses to
+build. That is LayerSmith spending a privilege it already holds; the scanner
+is given none of it.
+
+### When LayerSmith runs in a container
+
+The scanner is then a *sibling* container, and `/data` inside LayerSmith is
+not a path the runtime knows. Tell it how to reach the archive, one of two
+ways:
+
+| Option | Use when |
+| --- | --- |
+| `LAYERSMITH_SCANNER_DATA_VOLUME` | the data directory is a named volume (compose). It is mounted read-only into the scanner and paths are unchanged. |
+| `LAYERSMITH_SCANNER_HOST_DATA_DIR` | the data directory is bind-mounted from the host. Paths are translated to their host form. |
+
+Running LayerSmith directly on a host needs neither.
+
+### Trivy options
+
+All of these are `LAYERSMITH_SCANNER_<KEY>`, passed through without the rest
+of LayerSmith knowing them:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `IMAGE` | `ghcr.io/aquasecurity/trivy:0.74.0` | pinned; a scanner that changes under you is a poor scanner |
+| `MODE` | `auto` | `container`, or `binary` for a host install |
+| `BINARY` | `trivy` | the executable, in binary mode |
+| `RUNTIME` | the build runtime | which runtime starts the scan container |
+| `CACHE_VOLUME` | `layersmith-trivy-db` | where the vulnerability database lives |
+| `DATA_VOLUME` / `HOST_DATA_DIR` | — | see above |
+| `NETWORK` | runtime default | the network the scan container joins |
+| `MOUNT_FLAGS` | `ro,z` | mount options for the archive |
+| `OFFLINE` | `0` | never download the database; use what is already there |
+
+### What Trivy finds, and what it does not
+
+Verified against Trivy 0.74.0: vulnerabilities with fixed versions, secrets
+with a rule, file and line, and misconfigurations. Two things worth knowing:
+
+* Trivy allow-lists well-known documentation values, so a planted
+  `AKIAIOSFODNN7EXAMPLE` is *not* reported. A real-looking key is.
+* Trivy reads a docker-archive tar or an OCI layout *directory*. It cannot
+  read an oci-archive tar, which is what Podman writes by default, so a scan
+  on a Podman host exports a docker-archive rather than reusing the stored
+  one. That is a temporary export, and it is deleted afterwards.
 
 ## Configuration
 
@@ -89,6 +181,7 @@ See [.env.example](../.env.example). In short:
 | `LAYERSMITH_SCAN_KINDS` | `vulnerability,secret` | what to look for |
 | `LAYERSMITH_GENERATE_SBOM` | `1` | CycloneDX SBOM alongside a scan |
 | `LAYERSMITH_SCANNER_TIMEOUT` | `600` | seconds per scan |
+| `LAYERSMITH_SCAN_DIR` | `$DATA/scans` | where reports and SBOMs are kept |
 | `LAYERSMITH_SCANNER_<KEY>` | — | passed through to the scanner |
 
 **Settings → Security** shows which scanner is in use, what it can look for,

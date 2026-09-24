@@ -36,6 +36,7 @@ MOVABLE_PATHS = {
     "upload_dir": "LAYERSMITH_UPLOAD_DIR",
     "log_dir": "LAYERSMITH_LOG_DIR",
     "tmp_dir": "LAYERSMITH_TMP_DIR",
+    "scan_dir": "LAYERSMITH_SCAN_DIR",
 }
 
 
@@ -82,6 +83,7 @@ class Settings:
     upload_dir: Path
     log_dir: Path
     tmp_dir: Path
+    scan_dir: Path
     database_url: str
     build_backend: str
     podman_binary: str
@@ -111,7 +113,8 @@ class Settings:
 
     @property
     def directories(self) -> list[Path]:
-        return [self.data_dir, self.image_dir, self.build_dir, self.upload_dir, self.log_dir, self.tmp_dir]
+        return [self.data_dir, self.image_dir, self.build_dir, self.upload_dir, self.log_dir, self.tmp_dir,
+                self.scan_dir]
 
     def prepare(self) -> None:
         """Create the directories and fail loudly if any is not writable."""
@@ -136,6 +139,8 @@ def load() -> Settings:
         upload_dir=_path("LAYERSMITH_UPLOAD_DIR", data_dir / "uploads"),
         log_dir=_path("LAYERSMITH_LOG_DIR", data_dir / "logs"),
         tmp_dir=_path("LAYERSMITH_TMP_DIR", data_dir / "tmp"),
+        # Scan reports and SBOMs, kept beside the images they describe.
+        scan_dir=_path("LAYERSMITH_SCAN_DIR", data_dir / "scans"),
         database_url=os.environ.get("LAYERSMITH_DATABASE_URL", f"sqlite:///{data_dir / 'layersmith.db'}"),
         # auto: prefer Podman, fall back to Docker. See backends/__init__.py.
         build_backend=os.environ.get("LAYERSMITH_BUILD_BACKEND", "auto"),

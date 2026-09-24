@@ -7,10 +7,12 @@ base image from the network. Everything else in the suite uses a fake backend.
     LAYERSMITH_SMOKE=1 pytest tests/test_podman_smoke.py -v
 """
 
+import json
 import os
 import shutil
 import subprocess
 import tarfile
+from pathlib import Path
 
 import pytest
 
@@ -18,8 +20,12 @@ from layersmith import config
 from layersmith.backends.docker import DockerBackend
 from layersmith.backends.podman import PodmanBackend
 from layersmith.core.spec import validate_spec
-from layersmith.models import Build, Project, create_all, make_engine, make_session_factory, next_build_number
+from layersmith.models import (
+    Build, Project, Scan, create_all, make_engine, make_session_factory, next_build_number,
+)
+from layersmith.scanners.trivy import DEFAULT_IMAGE, TrivyScanner
 from layersmith.services.builds import BuildService, sha256_file
+from layersmith.services.scanning import ScanService
 
 pytestmark = pytest.mark.skipif(not os.environ.get("LAYERSMITH_SMOKE"), reason="needs LAYERSMITH_SMOKE=1")
 
@@ -112,3 +118,61 @@ def test_real_build_export_and_airgap_bundle(service, tmp_path):
     subprocess.run([binary, "rmi", "-f", reference], capture_output=True)
     loaded = subprocess.run([binary, "load", "-i", export_path], capture_output=True, text=True, timeout=300)
     assert loaded.returncode == 0, loaded.stderr
+
+
+# ------------------------------------------------------------- scanning
+
+def _trivy_image_present(runtime: str) -> bool:
+    return subprocess.run([runtime, "image", "exists", DEFAULT_IMAGE],
+                          capture_output=True).returncode == 0
+
+
+def test_real_scan_of_a_real_image(service, tmp_path):
+    """Build, scan with a real scanner, and check nothing is left behind."""
+    build_service, factory = service
+    runtime = build_service.backend.binary
+    if not _trivy_image_present(runtime):
+        pytest.skip(f"{DEFAULT_IMAGE} is not present; pull it to run this")
+
+    settings = config.settings()
+    settings.scanner_options = {"mode": "container", "runtime": runtime}
+    scanner = TrivyScanner(settings)
+    available, detail = scanner.available()
+    assert available, detail
+
+    spec = validate_spec({"base": {"distribution": "Alpine", "version": "3.21"}, "packages": []})
+    with factory() as session:
+        project = Project(name="scan-smoke", repository=f"{IMAGE}-scan", spec=spec, mode="gui",
+                          base_image=spec["base"]["source"])
+        session.add(project)
+        session.flush()
+        build = Build(project_id=project.id, number=next_build_number(session), version=VERSION, mode="gui",
+                      spec=spec, base_image=spec["base"]["source"], architecture="amd64",
+                      image_ref=f"{IMAGE}-scan:{VERSION}")
+        session.add(build)
+        session.commit()
+        build_id = build.id
+    build_service.run(build_id)
+    with factory() as session:
+        assert session.get(Build, build_id).status == "ready"
+
+    scan_service = ScanService(factory, build_service.backend, scanner, settings=settings)
+    scan_id = scan_service.scan_now(build_id)
+
+    with factory() as session:
+        scan = session.get(Scan, scan_id)
+        assert scan.state == "completed", scan.error
+        assert scan.scanner == "trivy" and scan.scanner_version
+        assert scan.database_version, "the vulnerability database was not reported"
+        assert scan.archive_source in ("existing_export", "temporary_export")
+        assert scan.sbom_format == "cyclonedx" and scan.sbom_components > 0
+        report = json.loads(Path(scan.report_path).read_text())
+
+    # The build history is stripped: it can carry secrets from RUN commands.
+    assert report.get("Metadata", {}).get("ImageConfig") == "[redacted by LayerSmith]"
+    # A scan cleans up after itself, and leaves the real export alone.
+    assert not list(Path(settings.tmp_dir).glob("scan-*.tar"))
+    with factory() as session:
+        assert Path(session.get(Build, build_id).export_path).is_file()
+
+    subprocess.run([runtime, "rmi", "-f", f"{IMAGE}-scan:{VERSION}"], capture_output=True)

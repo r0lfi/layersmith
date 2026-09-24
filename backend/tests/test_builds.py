@@ -22,6 +22,8 @@ class FakeBackend:
 
     name = "fake"
     archive_format = "oci-archive"
+    # Like Podman: writes either format, defaults to the OCI one.
+    archive_formats = ("oci-archive", "docker-archive")
 
     def __init__(self, fail_on: str | None = None):
         self.fail_on = fail_on
@@ -51,8 +53,8 @@ class FakeBackend:
     def inspect(self, image_ref):
         return ImageInfo(reference=image_ref, image_id="sha256:" + "b" * 64)
 
-    def export(self, image_ref, destination, on_log):
-        self.calls.append(("export", image_ref, str(destination)))
+    def export(self, image_ref, destination, on_log, archive_format=None):
+        self.calls.append(("export", image_ref, str(destination), archive_format or self.archive_format))
         Path(destination).parent.mkdir(parents=True, exist_ok=True)
         Path(destination).write_bytes(b"oci-archive-content")
         on_log("Exported")

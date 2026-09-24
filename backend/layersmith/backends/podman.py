@@ -13,6 +13,8 @@ from layersmith.backends.cli import CliBackend
 class PodmanBackend(CliBackend):
     name = "podman"
     archive_format = "oci-archive"
+    # Podman writes either; docker save only writes its own format.
+    archive_formats = ("oci-archive", "docker-archive")
 
     def __init__(self, binary: str = "podman", timeout: int = 3 * 60 * 60):
         super().__init__(binary, timeout)
@@ -26,5 +28,5 @@ class PodmanBackend(CliBackend):
         # same version really rebuilds rather than replaying stale layers.
         return ["--arch", architecture, "--pull=never", "--layers=false"]
 
-    def _save_args(self, destination: Path) -> list[str]:
-        return ["--format", "oci-archive", "--output", str(destination)]
+    def _save_args(self, destination: Path, archive_format: str) -> list[str]:
+        return ["--format", archive_format, "--output", str(destination)]

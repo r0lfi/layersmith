@@ -19,7 +19,17 @@ PACKAGE = Path(__file__).resolve().parent.parent / "layersmith"
 
 @pytest.fixture
 def settings(tmp_path):
-    return config.reset_for_tests(data_dir=tmp_path)
+    return config.reset_for_tests(data_dir=tmp_path, scanner="auto")
+
+
+@pytest.fixture(autouse=True)
+def only_registered_scanners(monkeypatch):
+    """Selection tests decide what is registered.
+
+    Otherwise the result would depend on whether the machine running the
+    tests happens to have a scanner installed.
+    """
+    monkeypatch.setattr(scanners, "SCANNERS", {"none": lambda _s: NoneScanner()})
 
 
 def test_default_scanner_is_none(settings):
@@ -59,7 +69,7 @@ def test_unknown_scanner_is_rejected(settings):
     assert "LAYERSMITH_SCANNER" in str(exc.value)
 
 
-def test_auto_falls_back_to_none_when_nothing_is_reachable(settings, monkeypatch):
+def test_auto_falls_back_to_none_when_nothing_is_reachable(settings):
     """A registered but unusable scanner must not be selected by auto."""
 
     class Unreachable(NoneScanner):
@@ -68,12 +78,12 @@ def test_auto_falls_back_to_none_when_nothing_is_reachable(settings, monkeypatch
         def available(self):
             return False, "not running"
 
-    monkeypatch.setitem(scanners.SCANNERS, "unreachable", lambda _s: Unreachable())
+    scanners.SCANNERS["unreachable"] = lambda _s: Unreachable()
     settings.scanner = "auto"
     assert scanners.make_scanner(settings).name == "none"
 
 
-def test_auto_selects_a_reachable_scanner(settings, monkeypatch):
+def test_auto_selects_a_reachable_scanner(settings):
     class Reachable(NoneScanner):
         name = "reachable"
         supported_kinds = (base.VULNERABILITY,)
@@ -85,7 +95,7 @@ def test_auto_selects_a_reachable_scanner(settings, monkeypatch):
         def version(self):
             return "1.2.3"
 
-    monkeypatch.setitem(scanners.SCANNERS, "reachable", lambda _s: Reachable())
+    scanners.SCANNERS["reachable"] = lambda _s: Reachable()
     settings.scanner = "auto"
     scanner = scanners.make_scanner(settings)
     assert scanner.name == "reachable"
@@ -158,7 +168,7 @@ def test_no_scanner_is_named_outside_the_scanner_package():
     scanner's name appearing elsewhere in the package means something
     grew a hard dependency on it.
     """
-    known = [name for name in scanners.SCANNERS if name != "none"] + ["trivy", "grype", "clair", "syft"]
+    known = ["trivy", "grype", "clair", "syft"]
     if not known:
         pytest.skip("no concrete scanner registered yet")
     hits = subprocess.run(

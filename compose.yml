@@ -29,6 +29,21 @@ services:
       LAYERSMITH_BUILD_BACKEND: docker
       DOCKER_HOST: unix:///var/run/docker.sock
 
+      # ---- image scanning (optional) -------------------------------------
+      # Off until the scanner image is present on the host:
+      #   docker pull ghcr.io/aquasecurity/trivy:0.74.0
+      # LayerSmith then scans each finished image and reports what it found;
+      # it never blocks a build. The scanner runs in its own container with
+      # no socket, no added capabilities and one read-only mount.
+      #
+      # LAYERSMITH_SCANNER: auto
+      # LAYERSMITH_SCANNER_RUNTIME: docker
+      # The scanner runs as a sibling container, so it cannot see this
+      # container's /data; naming the volume lets it reach the archive being
+      # scanned. Compose prefixes volume names with the project, so check
+      # `docker volume ls` and use the name it shows - usually:
+      # LAYERSMITH_SCANNER_DATA_VOLUME: layersmith_layersmith-data
+
     volumes:
       # Everything LayerSmith keeps - database, images, builds, uploads, logs.
       - layersmith-data:/data
@@ -47,3 +62,6 @@ services:
 
 volumes:
   layersmith-data:
+# The scanner keeps its vulnerability database in a volume of its own, which
+# the runtime creates on the first scan; it is not declared here because the
+# scanner container is started per scan rather than by compose.

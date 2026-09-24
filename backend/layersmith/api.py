@@ -32,11 +32,13 @@ from layersmith.core.spec import (
     validate_spec, version_key,
 )
 from layersmith.models import (
-    Blob, Build, Project, create_all, make_engine, make_session_factory, next_build_number, utcnow,
+    Blob, Build, Project, Scan, ScanFinding, create_all, make_engine, make_session_factory, next_build_number,
+    utcnow,
 )
 from layersmith import scanners
 from layersmith.services import storage
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
+from layersmith.services.scanning import ScanError, ScanService, finding_row, summarise, sweep_temporary_exports
 
 router = APIRouter(prefix="/api")
 
@@ -70,6 +72,10 @@ class ImportIn(BaseModel):
 
 class CloneIn(BaseModel):
     name: str
+
+
+class ScanIn(BaseModel):
+    kinds: list[str] | None = None
 
 
 class StorageIn(BaseModel):
@@ -220,6 +226,62 @@ def update_storage(payload: StorageIn, state=Depends(get_state)):
         except RuntimeError as exc:  # prepare() refused a directory
             raise HTTPException(422, str(exc))
         return {"paths": storage.describe(session, app_settings)}
+
+
+@router.post("/builds/{build_id}/scan", status_code=202)
+def start_scan(build_id: str, payload: ScanIn | None = None, state=Depends(get_state)):
+    """Scan, or rescan, the image this build produced."""
+    service = state["scan_service"]
+    with state["session_factory"]() as session:
+        if session.get(Build, build_id) is None:
+            raise HTTPException(404, "Build not found")
+    try:
+        # A rescan is just a later scan; the history keeps them apart by time.
+        scan_id = service.create(build_id, reason="manual", kinds=(payload.kinds if payload else None))
+    except ScanError as exc:
+        raise HTTPException(422, str(exc))
+    service.enqueue(scan_id)
+    with state["session_factory"]() as session:
+        return summarise(session.get(Scan, scan_id))
+
+
+@router.get("/builds/{build_id}/scans")
+def build_scans(build_id: str, state=Depends(get_state)):
+    """Every scan of this build, newest first: the image's scan history."""
+    with state["session_factory"]() as session:
+        scans = session.scalars(
+            select(Scan).where(Scan.build_id == build_id).order_by(Scan.created_at.desc())
+        ).all()
+        return [summarise(scan) for scan in scans]
+
+
+@router.get("/scans/{scan_id}")
+def get_scan(scan_id: str, kind: str | None = None, severity: str | None = None, state=Depends(get_state)):
+    with state["session_factory"]() as session:
+        scan = session.get(Scan, scan_id)
+        if scan is None:
+            raise HTTPException(404, "Scan not found")
+        query = select(ScanFinding).where(ScanFinding.scan_id == scan_id)
+        if kind:
+            query = query.where(ScanFinding.kind == kind)
+        if severity:
+            query = query.where(ScanFinding.severity == severity.lower())
+        findings = session.scalars(query).all()
+        order = {level: index for index, level in enumerate(scanners.SEVERITIES)}
+        findings.sort(key=lambda row: (order.get(row.severity, 99), row.package_name or "", row.identifier))
+        return {**summarise(scan), "findings": [finding_row(row) for row in findings]}
+
+
+@router.get("/scans/{scan_id}/sbom")
+def get_sbom(scan_id: str, state=Depends(get_state)):
+    """The SBOM as a file, in the format the scanner produced."""
+    with state["session_factory"]() as session:
+        scan = session.get(Scan, scan_id)
+        if scan is None or not scan.sbom_path:
+            raise HTTPException(404, "This scan has no SBOM")
+        path = _safe_download(scan.sbom_path, [Path(config.settings().scan_dir)])
+        return FileResponse(path, media_type="application/json",
+                            filename=f"sbom-{scan.id}.{scan.sbom_format or 'json'}.json")
 
 
 @router.get("/stats")
@@ -496,10 +558,19 @@ def create_app(settings=None) -> FastAPI:
     settings.prepare()
     backend = make_backend(settings)
     service = BuildService(session_factory, backend, settings=settings)
+    scanner = scanners.make_scanner(settings)
+    scan_service = ScanService(session_factory, backend, scanner, settings=settings, log_bus=service.logs)
+    # Scanning is bolted on here rather than inside the build pipeline, so a
+    # build neither waits for a scan nor knows a scanner exists.
+    service.on_built = scan_service.after_build
+    # Temporary scan exports are removed as each scan ends; this clears any
+    # left behind by a crash or a kill.
+    sweep_temporary_exports(settings)
 
     app = FastAPI(title=config.APP_NAME, version=config.VERSION,
                   description=f"{config.TAGLINE} by xnett.org")
-    app.state.layersmith = {"session_factory": session_factory, "build_service": service, "settings": settings}
+    app.state.layersmith = {"session_factory": session_factory, "build_service": service,
+                            "scan_service": scan_service, "settings": settings}
     app.include_router(router)
 
     # The built web UI, when it has been compiled into ./static (see the

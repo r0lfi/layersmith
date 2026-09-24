@@ -30,6 +30,10 @@ from typing import Callable, Protocol
 INPUT_IMAGE_ARCHIVE = "image_archive"
 INPUT_IMAGE_REFERENCE = "image_reference"
 
+#: Archive shapes a scanner may accept, produced by the build backends.
+DOCKER_ARCHIVE = "docker-archive"
+OCI_ARCHIVE = "oci-archive"
+
 #: Finding categories. A scanner reports only what it supports.
 VULNERABILITY = "vulnerability"
 SECRET = "secret"
@@ -100,6 +104,9 @@ class ScanResult:
     database: DatabaseInfo = field(default_factory=DatabaseInfo)
     #: Raw scanner output, stored verbatim for troubleshooting and bundles.
     report: dict | None = None
+    #: The image the scanner believes it read, when it says. Checked against
+    #: the build record so a mismatched archive is caught rather than trusted.
+    scanned_image_id: str | None = None
 
     def counts(self, kind: str = VULNERABILITY) -> dict[str, int]:
         counts = {severity: 0 for severity in SEVERITIES}
@@ -129,6 +136,10 @@ class ScannerBackend(Protocol):
     name: str
     #: How the image should be handed over; see the module docstring.
     input_kind: str
+    #: Archive formats it can read, best first. The service exports into the
+    #: first of these the build backend can produce, or reuses an existing
+    #: export already in one of them.
+    archive_formats: tuple[str, ...]
     #: Finding kinds this scanner can produce.
     supported_kinds: tuple[str, ...]
     #: Whether it can produce an SBOM at all.

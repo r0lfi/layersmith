@@ -105,6 +105,7 @@ def describe(session, settings: config.Settings) -> list[dict]:
         "upload_dir": "Uploaded files",
         "log_dir": "Build logs",
         "tmp_dir": "Temporary",
+        "scan_dir": "Scan reports and SBOMs",
     }
     for field, variable in config.MOVABLE_PATHS.items():
         rows.append({

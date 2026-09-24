@@ -17,6 +17,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 ACTIVE_STATES = ("queued", "preparing", "pulling", "building", "testing", "exporting")
 BUILD_STATES = ACTIVE_STATES + ("ready", "failed", "cancelled")
 
+#: A scan has its own lifecycle, separate from the build's. An image is
+#: finished and downloadable whether or not it has been scanned, so a scan
+#: never holds a build back; 'exporting' is the temporary export a scan may
+#: need before it can start, which is slow enough to be worth showing.
+SCAN_ACTIVE_STATES = ("queued", "exporting", "scanning")
+SCAN_STATES = SCAN_ACTIVE_STATES + ("completed", "failed")
+
 
 def _uuid() -> str:
     return str(uuid.uuid4())
@@ -108,6 +115,85 @@ class Build(Base):
         if self.started_at and self.finished_at:
             return (self.finished_at - self.started_at).total_seconds()
         return None
+
+
+class Scan(Base):
+    """One scan of one immutable image.
+
+    Scans hang off the image digest, not just the build: a rescan months
+    later is a new row for the same digest, so 'what did we know, and when'
+    stays answerable. Findings live in their own table.
+    """
+
+    __tablename__ = "scans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    build_id: Mapped[str] = mapped_column(ForeignKey("builds.id"), index=True)
+    #: The immutable identity that was scanned. A scan is only ever shown for
+    #: the digest it actually ran against.
+    image_digest: Mapped[str | None] = mapped_column(String(80), index=True)
+    image_id: Mapped[str | None] = mapped_column(String(80))
+
+    state: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    error: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(String(16), default="build")  # build (automatic) | manual
+    kinds: Mapped[list] = mapped_column(JSON, default=list)
+
+    scanner: Mapped[str] = mapped_column(String(32), default="")
+    scanner_version: Mapped[str] = mapped_column(String(32), default="")
+    database_version: Mapped[str | None] = mapped_column(String(32))
+    database_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    database_offline: Mapped[bool] = mapped_column(default=False)
+
+    #: existing_export | temporary_export - troubleshooting detail, not a
+    #: headline: it explains why one scan took much longer than another.
+    archive_source: Mapped[str | None] = mapped_column(String(24))
+
+    #: {kind: {severity: count}}, so a new finding kind needs no migration.
+    counts: Mapped[dict] = mapped_column(JSON, default=dict)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+
+    sbom_format: Mapped[str | None] = mapped_column(String(16))
+    sbom_path: Mapped[str | None] = mapped_column(String(500))
+    sbom_sha256: Mapped[str | None] = mapped_column(String(64))
+    sbom_components: Mapped[int | None] = mapped_column(Integer)
+    report_path: Mapped[str | None] = mapped_column(String(500))
+
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set here rather than by the database: CURRENT_TIMESTAMP in SQLite has
+    # one-second resolution, and two scans of one image easily share a second.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    findings: Mapped[list["ScanFinding"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None
+
+
+class ScanFinding(Base):
+    """One finding, in fields no particular scanner's vocabulary decided."""
+
+    __tablename__ = "scan_findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    scan_id: Mapped[str] = mapped_column(ForeignKey("scans.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)  # vulnerability | secret | misconfiguration
+    severity: Mapped[str] = mapped_column(String(10), index=True)
+    identifier: Mapped[str] = mapped_column(String(80), default="")
+    title: Mapped[str] = mapped_column(Text, default="")
+    target: Mapped[str] = mapped_column(String(500), default="")
+    package_name: Mapped[str | None] = mapped_column(String(200))
+    installed_version: Mapped[str | None] = mapped_column(String(80))
+    fixed_version: Mapped[str | None] = mapped_column(String(80))
+    url: Mapped[str | None] = mapped_column(String(500))
+    #: A description of a secret match; never the secret itself.
+    masked_match: Mapped[str | None] = mapped_column(String(120))
+
+    scan: Mapped[Scan] = relationship(back_populates="findings")
 
 
 class Blob(Base):

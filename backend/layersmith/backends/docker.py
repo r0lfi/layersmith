@@ -21,6 +21,7 @@ from layersmith.backends.cli import CliBackend
 class DockerBackend(CliBackend):
     name = "docker"
     archive_format = "docker-archive"
+    archive_formats = ("docker-archive",)
 
     def __init__(self, binary: str = "docker", timeout: int = 3 * 60 * 60):
         super().__init__(binary, timeout)
@@ -31,5 +32,5 @@ class DockerBackend(CliBackend):
     def _build_args(self, architecture: str) -> list[str]:
         return ["--platform", f"linux/{architecture}", "--no-cache"]
 
-    def _save_args(self, destination: Path) -> list[str]:
+    def _save_args(self, destination: Path, archive_format: str) -> list[str]:
         return ["--output", str(destination)]

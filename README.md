@@ -153,6 +153,7 @@ Everything is optional; see [.env.example](.env.example) for the full list.
 | `LAYERSMITH_UPLOAD_DIR` | `$DATA/uploads` | Uploaded files |
 | `LAYERSMITH_LOG_DIR` | `$DATA/logs` | Build logs |
 | `LAYERSMITH_TMP_DIR` | `$DATA/tmp` | Scratch space |
+| `LAYERSMITH_SCAN_DIR` | `$DATA/scans` | Scan reports and SBOMs |
 | `LAYERSMITH_DATABASE_URL` | `sqlite:///$DATA/layersmith.db` | Any SQLAlchemy URL |
 | `LAYERSMITH_BUILD_BACKEND` | `auto` | `auto`, `podman` or `docker` |
 | `LAYERSMITH_DEFAULT_ARCH` | `amd64` | Architecture offered first |
@@ -165,7 +166,7 @@ Everything is optional; see [.env.example](.env.example) for the full list.
 | `LAYERSMITH_SCAN_KINDS` | `vulnerability,secret` | What a scan looks for |
 | `LAYERSMITH_GENERATE_SBOM` | `1` | Produce a CycloneDX SBOM with a scan |
 
-The five paths under the data directory are also editable at runtime in
+The six paths under the data directory are also editable at runtime in
 **Settings → Storage**. A value set in the environment wins and is shown
 read-only there. Changing a path never moves existing files, and archives
 written earlier stay downloadable.
@@ -217,7 +218,10 @@ LayerSmith runs build jobs, so it is treated as security-sensitive:
 - An unknown `/api/` path answers as the API, so a mistyped endpoint cannot
   be mistaken for a working one.
 - Image scanning, when configured, is handed an exported archive rather than
-  the container runtime's socket.
+  the container runtime's socket, in a container with every capability
+  dropped and one read-only mount.
+- Secret findings record a rule, a file and a line - never the value - and
+  the image's build history is stripped from a stored scan report.
 
 An image LayerSmith has not scanned is reported as unknown, never as clean;
 see [docs/scanning.md](docs/scanning.md).
