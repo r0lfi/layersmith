@@ -195,8 +195,10 @@ class TrivyScanner:
 
         # Do not pull several hundred megabytes behind the operator's back:
         # the image being present locally is what opts this host in.
+        # `image inspect` rather than `image exists`: the latter is Podman
+        # only, and using it made scanning impossible to enable on Docker.
         try:
-            present = subprocess.run([self.runtime, "image", "exists", self.image],
+            present = subprocess.run([self.runtime, "image", "inspect", self.image, "--format", "{{.Id}}"],
                                      capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.SubprocessError) as exc:
             return False, f"{self.runtime} is not usable: {exc}"

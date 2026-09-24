@@ -156,6 +156,27 @@ def test_availability_does_not_pull_the_image_behind_your_back(monkeypatch):
     assert all("pull" not in argv for argv in calls), "available() pulled an image"
 
 
+def test_presence_is_checked_with_a_command_both_runtimes_have(monkeypatch):
+    """`image exists` is Podman-only; Docker would always report missing."""
+    seen: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+        stdout = '{"Version":"0.74.0"}'
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        return Done()
+
+    monkeypatch.setattr("layersmith.scanners.trivy.subprocess.run", fake_run)
+    available, detail = scanner(runtime="docker").available()
+    assert available, detail
+    check = seen[0]
+    assert check[:3] == ["docker", "image", "inspect"]
+    assert "exists" not in check
+
+
 def test_health_states_that_no_socket_is_used():
     health = scanner().health()
     assert health["runtime_socket"] is False
