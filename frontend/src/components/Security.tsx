@@ -223,6 +223,13 @@ export function SecurityPanel({ buildId, scannerAvailable, scannerDetail }: {
             ))}
           </div>
 
+          {detail && (detail.finding_total ?? 0) > (detail.findings?.length ?? 0) && (
+            <p className="faint" style={{ marginTop: "0.6rem" }}>
+              Showing the {detail.findings?.length} worst of {detail.finding_total}. Pick a severity above
+              to narrow it down.
+            </p>
+          )}
+
           {detail?.findings?.length ? (
             <table className="table findings">
               <thead>

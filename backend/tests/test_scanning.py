@@ -598,3 +598,19 @@ def test_a_temporary_export_is_readable_too(env):
     with env["service"].archive_for(env["build_id"]) as archive:
         assert archive.source == TEMPORARY_EXPORT
         assert archive.path.stat().st_mode & 0o044
+
+
+def test_findings_are_capped_but_the_total_is_told(api):
+    """A base image can carry thousands; the worst come first and it says so."""
+    build_id = _ready_build(api)
+    service = api.state["scan_service"]
+    service.scanner.findings = [
+        Finding(kind=base.VULNERABILITY, severity="low", identifier=f"CVE-{index}")
+        for index in range(60)
+    ] + [Finding(kind=base.VULNERABILITY, severity="critical", identifier="CVE-WORST")]
+    scan = api.post(f"/api/builds/{build_id}/scan", json={}).json()
+
+    body = api.get(f"/api/scans/{scan['id']}?limit=10").json()
+    assert body["finding_total"] == 61
+    assert len(body["findings"]) == 10
+    assert body["findings"][0]["identifier"] == "CVE-WORST", "the worst must survive the cap"

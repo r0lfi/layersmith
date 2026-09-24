@@ -255,8 +255,16 @@ def build_scans(build_id: str, state=Depends(get_state)):
         return [summarise(scan) for scan in scans]
 
 
+#: A base image can carry thousands of findings, which is a table no one
+#: reads and a page that struggles to render. The worst are returned first
+#: and the response says how many were left out.
+FINDING_LIMIT = 500
+
+
 @router.get("/scans/{scan_id}")
-def get_scan(scan_id: str, kind: str | None = None, severity: str | None = None, state=Depends(get_state)):
+def get_scan(scan_id: str, kind: str | None = None, severity: str | None = None,
+             limit: int = FINDING_LIMIT, state=Depends(get_state)):
+    limit = max(1, min(limit, 5000))
     with state["session_factory"]() as session:
         scan = session.get(Scan, scan_id)
         if scan is None:
@@ -266,10 +274,11 @@ def get_scan(scan_id: str, kind: str | None = None, severity: str | None = None,
             query = query.where(ScanFinding.kind == kind)
         if severity:
             query = query.where(ScanFinding.severity == severity.lower())
-        findings = session.scalars(query).all()
+        findings = list(session.scalars(query).all())
         order = {level: index for index, level in enumerate(scanners.SEVERITIES)}
         findings.sort(key=lambda row: (order.get(row.severity, 99), row.package_name or "", row.identifier))
-        return {**summarise(scan), "findings": [finding_row(row) for row in findings]}
+        return {**summarise(scan), "finding_total": len(findings), "finding_limit": limit,
+                "findings": [finding_row(row) for row in findings[:limit]]}
 
 
 @router.get("/scans/{scan_id}/sbom")

@@ -69,6 +69,9 @@ export interface Scan {
   duration_seconds?: number | null;
   created_at?: string | null;
   findings?: Finding[];
+  /** How many findings matched, before the response was capped. */
+  finding_total?: number;
+  finding_limit?: number;
 }
 
 export interface Finding {
