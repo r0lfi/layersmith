@@ -122,6 +122,10 @@ class BuildService:
         #: Called with a build id once an image is ready. The application
         #: wires scanning in here; the build pipeline knows nothing about it.
         self.on_built = None
+        #: Called with (build, directory) while bundling, to add whatever
+        #: security artifacts exist. Same arrangement: no scanner knowledge
+        #: here, and a bundle is still produced when nothing is wired in.
+        self.security_artifacts = None
 
     # ------------------------------------------------------------- queue
 
@@ -323,6 +327,12 @@ class BuildService:
                 INSTALL_TEXT.format(image_ref=build.image_ref, load_command=load_command,
                                     archive_format=getattr(self.backend, "archive_format", "OCI archive")),
                 encoding="utf-8")
+
+            # What was known about this image when it was bundled. Absent
+            # when it was never scanned - and then the bundle says so rather
+            # than staying silent about it.
+            if self.security_artifacts is not None:
+                self.security_artifacts(build, staging / "security")
 
             sums = []
             for path in sorted(staging.rglob("*")):

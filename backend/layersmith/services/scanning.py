@@ -24,11 +24,14 @@ Concurrent scans never share a temporary file: each gets its own name.
 
 import json
 import queue
+import shutil
 import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+from sqlalchemy import select
 
 from layersmith import config
 from layersmith.backends.base import BuildError
@@ -307,6 +310,39 @@ class ScanService:
                 self.logs.publish(f"scan:{scan_id}", {"type": "log", "line": line})
         return log
 
+    # ------------------------------------------------- air-gap artifacts
+
+    def write_artifacts(self, build, directory: Path) -> None:
+        """Write what is known about this image's security into a bundle.
+
+        An air-gapped recipient cannot scan for themselves and cannot look a
+        CVE up, so the bundle carries the scan as it stood, its date, and the
+        version of the data behind it. An unscanned image says so plainly
+        instead of the bundle being quiet about it.
+        """
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        with self.session_factory() as session:
+            scan = session.scalars(
+                select(Scan).where(Scan.build_id == build.id, Scan.state == "completed")
+                .order_by(Scan.created_at.desc())
+            ).first()
+            if scan is None:
+                (directory / "NOT-SCANNED.txt").write_text(NOT_SCANNED_TEXT, encoding="utf-8")
+                return
+            findings = session.scalars(
+                select(ScanFinding).where(ScanFinding.scan_id == scan.id)
+            ).all()
+            summary = summarise(scan)
+            for source, name in ((scan.report_path, "scan-report.json"),
+                                 (scan.sbom_path, f"sbom.{scan.sbom_format or 'json'}.json")):
+                if source and Path(source).is_file():
+                    shutil.copy2(Path(source), directory / name)
+            (directory / "scan.json").write_text(
+                json.dumps({**summary, "findings": [finding_row(row) for row in findings]}, indent=2) + "\n",
+                encoding="utf-8")
+            (directory / "SECURITY.txt").write_text(_security_text(scan, summary), encoding="utf-8")
+
     # ------------------------------------------------------------ removal
 
     def delete_artifacts(self, scan: Scan) -> None:
@@ -314,6 +350,61 @@ class ScanService:
         for path in (scan.report_path, scan.sbom_path):
             if path:
                 Path(path).unlink(missing_ok=True)
+
+
+NOT_SCANNED_TEXT = """\
+This image has not been scanned.
+
+Nothing is known about its vulnerabilities. That is not the same as the
+image being clean - it means no one has looked.
+
+To scan it where this bundle is opened, load the image and point a scanner
+at it, or scan the archive in this bundle directly.
+"""
+
+SECURITY_TEXT = """\
+Security report for {image_ref}
+{underline}
+
+Scanned:          {finished_at}
+Scanner:          {scanner} {scanner_version}
+Vulnerability DB: {database}
+Image digest:     {digest}
+
+Findings
+--------
+{counts}
+
+What this is
+------------
+A scan is a snapshot: it records what that vulnerability database knew on
+that date about the packages in this image. It is not a statement that the
+image is secure, and findings published after that date are not in here.
+
+scan.json holds every finding in full, scan-report.json the scanner's own
+output, and sbom.*.json the bill of materials. Secret findings record a
+rule, a file and a line - never the value.
+"""
+
+
+def _security_text(scan: Scan, summary: dict) -> str:
+    lines = []
+    for kind, counts in sorted((scan.counts or {}).items()):
+        detail = ", ".join(f"{count} {severity}" for severity, count in counts.items() if count)
+        lines.append(f"{kind + ':':<20}{detail or 'none'}")
+    database = f"v{scan.database_version}" if scan.database_version else "unknown"
+    if scan.database_updated_at:
+        database += f", updated {scan.database_updated_at:%Y-%m-%d}"
+    if scan.database_offline:
+        database += " (imported offline)"
+    reference = summary.get("image_digest") or scan.build_id
+    return SECURITY_TEXT.format(
+        image_ref=reference, underline="=" * (len(str(reference)) + 21),
+        finished_at=scan.finished_at.strftime("%Y-%m-%d %H:%M UTC") if scan.finished_at else "unknown",
+        scanner=scan.scanner, scanner_version=scan.scanner_version,
+        database=database, digest=scan.image_digest or "unknown",
+        counts="\n".join(lines) or "none recorded",
+    )
 
 
 def _same_image(left: str, right: str) -> bool:

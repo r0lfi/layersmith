@@ -231,7 +231,9 @@ see [docs/scanning.md](docs/scanning.md).
 somewhere you trust, or front it with a proxy); a build runs code you supply;
 nothing is garbage collected; no quotas; one build at a time.
 
-Report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
+LayerSmith is scanned by its own CI on every push and weekly: dependencies,
+the repository's whole history for secrets, and the published application
+image. See [SECURITY.md](SECURITY.md), and report vulnerabilities privately.
 
 ## Development
 

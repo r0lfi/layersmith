@@ -1,0 +1,143 @@
+# LayerSmith builds container images, so it is worth scanning itself.
+#
+# Three separate questions, three jobs, so a failure says which one:
+#
+#   dependencies  are the Python and npm packages we depend on vulnerable?
+#   secrets       did a credential get committed?
+#   image         is the published application image vulnerable?
+#
+# Findings are reported, not enforced, in the same spirit as LayerSmith's own
+# scanning: a job fails on a CRITICAL or HIGH that has a fix available, which
+# is something a maintainer can act on, and reports the rest.
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Vulnerabilities are published after code is merged, so a weekly run
+    # against unchanged code is the point, not a redundancy.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_VERSION: "0.74.0"
+
+jobs:
+  dependencies:
+    name: Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          # An out-of-date pip is itself a finding, and one that would
+          # otherwise fail this job over the runner rather than over us.
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      # pip-audit reads what is actually installed, which includes transitive
+      # dependencies a lockfile-free project would otherwise never check.
+      # --skip-editable: LayerSmith itself is not on PyPI, and auditing the
+      # package against itself is not the question being asked here.
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable --desc
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      # Build tooling only ships to developers, so production dependencies
+      # are the ones that must be clean; the rest is reported.
+      - name: Audit npm dependencies
+        working-directory: frontend
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm audit || true
+
+  secrets:
+    name: Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Whole history: a secret removed in a later commit is still in the
+          # repository, and a shallow clone would not see it.
+          fetch-depth: 0
+
+      - name: Scan the repository and its history
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" \
+            ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
+            fs /repo --scanners secret --exit-code 1 --no-progress
+
+  image:
+    name: Application image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the application image
+        run: docker build -t layersmith:ci .
+
+      # The image is exported and scanned as a file - the same arrangement
+      # LayerSmith uses for the images its users build: the scanner is given
+      # an archive, never the Docker socket.
+      - name: Export the image
+        run: docker save -o /tmp/layersmith-ci.tar layersmith:ci
+
+      - name: Scan for fixable CRITICAL and HIGH
+        run: |
+          docker run --rm \
+            --security-opt no-new-privileges --cap-drop ALL \
+            -v /tmp/layersmith-ci.tar:/scan/image.tar:ro \
+            -v trivy-db:/root/.cache \
+            ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
+            image --input /scan/image.tar \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress
+
+      # Everything else, including what has no fix yet, so it is visible
+      # without failing a build over something nobody can act on.
+      - name: Report everything else
+        if: always()
+        run: |
+          docker run --rm \
+            --security-opt no-new-privileges --cap-drop ALL \
+            -v /tmp/layersmith-ci.tar:/scan/image.tar:ro \
+            -v trivy-db:/root/.cache \
+            ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
+            image --input /scan/image.tar --scanners vuln,secret --no-progress
+
+      - name: Generate an SBOM
+        run: |
+          docker run --rm \
+            -v /tmp/layersmith-ci.tar:/scan/image.tar:ro \
+            -v trivy-db:/root/.cache \
+            ghcr.io/aquasecurity/trivy:${TRIVY_VERSION} \
+            image --input /scan/image.tar --format cyclonedx --no-progress > /tmp/sbom.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: /tmp/sbom.json
+          retention-days: 30

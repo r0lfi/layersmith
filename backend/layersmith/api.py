@@ -563,6 +563,7 @@ def create_app(settings=None) -> FastAPI:
     # Scanning is bolted on here rather than inside the build pipeline, so a
     # build neither waits for a scan nor knows a scanner exists.
     service.on_built = scan_service.after_build
+    service.security_artifacts = scan_service.write_artifacts
     # Temporary scan exports are removed as each scan ends; this clears any
     # left behind by a crash or a kill.
     sweep_temporary_exports(settings)

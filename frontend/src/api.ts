@@ -39,6 +39,51 @@ export interface Build {
   manifest?: Record<string, unknown>;
 }
 
+export type ScanState = "queued" | "exporting" | "scanning" | "completed" | "failed";
+export type Severity = "critical" | "high" | "medium" | "low" | "unknown";
+
+export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "unknown"];
+export const SCAN_ACTIVE: ScanState[] = ["queued", "exporting", "scanning"];
+
+export interface Scan {
+  id: string;
+  build_id: string;
+  image_digest?: string | null;
+  state: ScanState;
+  reason: string;
+  error?: string | null;
+  kinds: string[];
+  scanner: string;
+  scanner_version: string;
+  database: { version?: string | null; updated_at?: string | null; offline: boolean };
+  /** Whether the scan reused the stored export or made a temporary one. */
+  archive_source?: string | null;
+  counts: Record<string, Record<string, number>>;
+  severity: Record<Severity, number>;
+  total: number;
+  sbom?: { format: string; components: number | null; sha256: string | null } | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  created_at?: string | null;
+  findings?: Finding[];
+}
+
+export interface Finding {
+  id: string;
+  kind: "vulnerability" | "secret" | "misconfiguration";
+  severity: Severity;
+  identifier: string;
+  title: string;
+  target: string;
+  package_name?: string | null;
+  installed_version?: string | null;
+  fixed_version?: string | null;
+  url?: string | null;
+  /** A description of a secret match. Never the secret itself. */
+  masked_match?: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -189,6 +234,17 @@ export const api = {
   airgap: (buildId: string) =>
     request<{ filename: string; size: number; sha256: string }>(`/builds/${buildId}/airgap`, { method: "POST" }),
   downloadUrl: (buildId: string, kind: "export" | "airgap") => `/api/builds/${buildId}/download/${kind}`,
+
+  scans: (buildId: string) => request<Scan[]>(`/builds/${buildId}/scans`),
+  startScan: (buildId: string) => request<Scan>(`/builds/${buildId}/scan`, { method: "POST", body: "{}" }),
+  scan: (scanId: string, filters: { kind?: string; severity?: string } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.kind) query.set("kind", filters.kind);
+    if (filters.severity) query.set("severity", filters.severity);
+    const suffix = query.toString();
+    return request<Scan>(`/scans/${scanId}${suffix ? `?${suffix}` : ""}`);
+  },
+  sbomUrl: (scanId: string) => `/api/scans/${scanId}/sbom`,
 
   upload: async (file: File) => {
     const form = new FormData();

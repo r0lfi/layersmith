@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, buildLogSocket, formatBytes, formatDuration, formatWhen } from "../api";
 import { Banner, Card, StatusPill, isActive, useLoad } from "../components/ui";
+import { SecurityPanel } from "../components/Security";
 
 function LogLine({ line }: { line: string }) {
   const className = /^STEP |^--> /.test(line)
@@ -19,6 +20,7 @@ function LogLine({ line }: { line: string }) {
 export default function BuildDetail() {
   const { id = "" } = useParams();
   const { data: build, error, reload } = useLoad(() => api.build(id), [id]);
+  const { data: settings } = useLoad(() => api.settings(), []);
   const [lines, setLines] = useState<string[]>([]);
   const [live, setLive] = useState(false);
   const [follow, setFollow] = useState(true);
@@ -155,6 +157,14 @@ export default function BuildDetail() {
           <pre className="code">{build.containerfile || "-"}</pre>
         </Card>
       </div>
+
+      {build.status === "ready" && (
+        <SecurityPanel
+          buildId={build.id}
+          scannerAvailable={!!settings?.scanner?.available}
+          scannerDetail={settings?.scanner?.detail ?? ""}
+        />
+      )}
 
       <Card
         title="Build log"

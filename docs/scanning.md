@@ -170,6 +170,66 @@ with a rule, file and line, and misconfigurations. Two things worth knowing:
   on a Podman host exports a docker-archive rather than reusing the stored
   one. That is a temporary export, and it is deleted afterwards.
 
+## Air-gapped use
+
+Two separate things travel offline: what a built image's bundle says about
+itself, and the scanner's own vulnerability database.
+
+### What a bundle carries
+
+An air-gap bundle gets a `security/` folder holding the newest completed
+scan of that exact image:
+
+| File | What it is |
+| --- | --- |
+| `SECURITY.txt` | the scan in plain words: date, scanner, database version, counts |
+| `scan.json` | every finding, in LayerSmith's scanner-neutral shape |
+| `scan-report.json` | the scanner's own output, with secret values stripped |
+| `sbom.cyclonedx.json` | the bill of materials |
+
+All of it is covered by the bundle's `SHA256SUMS`. If the image was never
+scanned, the folder holds `NOT-SCANNED.txt` saying exactly that — a bundle
+should not be silent about what nobody checked.
+
+`SECURITY.txt` says in as many words that a scan is a snapshot of what one
+database knew on one date, not a statement that the image is secure. The
+recipient of an air-gapped bundle cannot check for themselves, which is
+precisely why that has to be written down.
+
+### Seeding the database offline
+
+The scanner needs its vulnerability database, and an air-gapped host cannot
+download one. Fill the cache volume on a connected machine and carry it
+across. Verified with Trivy 0.74.0 (the database is about 1.3 GB unpacked):
+
+```bash
+# On a connected machine
+podman run --rm -v layersmith-trivy-db:/root/.cache \
+  ghcr.io/aquasecurity/trivy:0.74.0 image --download-db-only
+
+podman run --rm -v layersmith-trivy-db:/root/.cache -v "$PWD":/out:z \
+  docker.io/library/alpine:3.22 tar czf /out/trivy-db.tar.gz -C /root/.cache .
+```
+
+Carry `trivy-db.tar.gz` and the Trivy image (`podman save`) across, then:
+
+```bash
+# On the air-gapped machine
+podman load -i trivy.tar
+podman run --rm -v layersmith-trivy-db:/root/.cache -v "$PWD":/in:ro,z \
+  docker.io/library/alpine:3.22 tar xzf /in/trivy-db.tar.gz -C /root/.cache
+```
+
+Then tell LayerSmith never to try to update it:
+
+```
+LAYERSMITH_SCANNER_OFFLINE=1
+```
+
+Scans then use the database as imported, and say so: a scan performed with
+offline data is marked as such in the UI and in the bundle, because its age
+is the thing that matters most about it.
+
 ## Configuration
 
 See [.env.example](../.env.example). In short:

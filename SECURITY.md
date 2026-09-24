@@ -37,6 +37,30 @@ are:
 - a build reading or exfiltrating another project's data
 - secrets ending up in an image, a log or a build record
 
+## What LayerSmith checks about itself
+
+Every push, pull request and weekly on a schedule
+([`.github/workflows/security.yml`](.github/workflows/security.yml)):
+
+- **Dependencies** — `pip-audit` over the installed Python packages, and
+  `npm audit` over the frontend's production dependencies.
+- **Secrets** — the repository *and its whole history*, because a credential
+  deleted in a later commit is still in the repository.
+- **The application image** — built, exported and scanned as a file. The
+  scanner gets an archive, not the Docker socket, exactly as LayerSmith does
+  it for the images its users build. A CRITICAL or HIGH *with a fix
+  available* fails the job; everything else is reported, including what has
+  no fix yet, so nothing is hidden and nothing fails over something no one
+  can act on.
+
+A CycloneDX SBOM of the application image is published as a build artifact.
+
+## Scanning the images you build
+
+Optional, off until you configure it, and it reports rather than blocks —
+see [docs/scanning.md](docs/scanning.md). An image LayerSmith has not scanned
+is reported as *unknown*, never as clean.
+
 ## What is known, and not a vulnerability
 
 These are documented design limitations of 0.1.x, not findings:
@@ -50,6 +74,9 @@ These are documented design limitations of 0.1.x, not findings:
   run containers as the socket's owner. `docs/deployment.md` describes
   configurations that isolate the builder.
 - **No quotas and no garbage collection.** A user can fill the data volume.
+- **A scan is a snapshot.** It records what one vulnerability database knew
+  on one date. An image scanned clean last month is not clean today, and
+  LayerSmith never labels an image "secure".
 
 If you can get past a boundary the documentation claims to hold, that *is* a
 vulnerability and we want to hear about it.

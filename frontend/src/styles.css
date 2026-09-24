@@ -241,6 +241,72 @@ label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-botto
   .log { max-height: 50vh; font-size: 0.74rem; }
 }
 
+
+/* --------------------------------------------------------- security */
+
+:root {
+  --sev-critical: #f87171;
+  --sev-high: #fb923c;
+  --sev-medium: #fbbf24;
+  --sev-low: #60a5fa;
+  --sev-unknown: #94a3b8;
+}
+
+.sev-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.sev {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+  min-width: 4.6rem; padding: 0.5rem 0.7rem;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: inherit; cursor: default;
+}
+button.sev { cursor: pointer; }
+button.sev:hover { border-color: var(--border-strong); }
+.sev.picked { border-color: currentColor; background: var(--surface); }
+.sev-count { font-size: 1.25rem; font-weight: 680; font-variant-numeric: tabular-nums; }
+.sev-name { font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
+.sev.critical { color: var(--sev-critical); }
+.sev.high { color: var(--sev-high); }
+.sev.medium { color: var(--sev-medium); }
+.sev.low { color: var(--sev-low); }
+.sev.unknown { color: var(--sev-unknown); }
+/* A zero count is still shown, just quietly: absence of a finding is
+   information, and hiding it would overstate what a scan proves. */
+.sev.zero { color: var(--text-faint); }
+.sev.zero .sev-count { opacity: 0.55; }
+
+.sev-tag {
+  display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 660; letter-spacing: 0.05em; text-transform: uppercase;
+  border: 1px solid currentColor;
+}
+.sev-tag.critical { color: var(--sev-critical); }
+.sev-tag.high { color: var(--sev-high); }
+.sev-tag.medium { color: var(--sev-medium); }
+.sev-tag.low { color: var(--sev-low); }
+.sev-tag.unknown { color: var(--sev-unknown); }
+
+.tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+button.tab {
+  background: transparent; border: 0; border-bottom: 2px solid transparent;
+  border-radius: 0; color: var(--text-dim); padding: 0.45rem 0.7rem;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+}
+button.tab:hover:not(:disabled) { color: var(--text); border-color: transparent; }
+button.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-count {
+  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); border-radius: 999px; padding: 0.05rem 0.4rem;
+}
+
+.table.findings td { vertical-align: top; }
+.table.findings .fixed { color: var(--ok); }
+.picked-row { background: var(--surface-2); }
+button.link {
+  background: transparent; border: 0; color: var(--accent); padding: 0.2rem 0;
+}
+button.link:hover:not(:disabled) { text-decoration: underline; border-color: transparent; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }

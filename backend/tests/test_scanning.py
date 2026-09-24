@@ -465,3 +465,89 @@ def test_an_unfinished_build_cannot_be_scanned(api):
     build = api.post(f"/api/projects/{project['id']}/builds", json={}).json()
     response = api.post(f"/api/builds/{build['id']}/scan", json={})
     assert response.status_code == 422 and "finished build" in response.json()["detail"]
+
+
+# ------------------------------------------------------- air-gap artifacts
+
+def test_a_bundle_carries_the_scan_that_was_made(env, tmp_path):
+    env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        build = session.get(Build, env["build_id"])
+        env["service"].write_artifacts(build, tmp_path / "security")
+
+    written = {path.name for path in (tmp_path / "security").iterdir()}
+    assert {"scan.json", "SECURITY.txt", "scan-report.json"} <= written
+    assert any(name.startswith("sbom.") for name in written)
+
+    report = json.loads((tmp_path / "security" / "scan.json").read_text())
+    assert report["total"] == 3
+    assert len(report["findings"]) == 3
+
+    text = (tmp_path / "security" / "SECURITY.txt").read_text()
+    assert "vulnerability:" in text and "1 critical" in text
+    # An air-gapped reader cannot check anything themselves, so the bundle
+    # must not let a scan be mistaken for a clean bill of health.
+    assert "not a statement that the" in text
+
+
+def test_a_bundle_says_so_when_nothing_was_scanned(env, tmp_path):
+    with env["session_factory"]() as session:
+        build = session.get(Build, env["build_id"])
+        env["service"].write_artifacts(build, tmp_path / "security")
+    text = (tmp_path / "security" / "NOT-SCANNED.txt").read_text()
+    assert "has not been scanned" in text
+    assert "not the same as" in text
+
+
+def test_a_failed_scan_is_not_presented_as_a_result(env, tmp_path):
+    env["scanner"].fail = "scan"
+    env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        build = session.get(Build, env["build_id"])
+        env["service"].write_artifacts(build, tmp_path / "security")
+    assert (tmp_path / "security" / "NOT-SCANNED.txt").is_file()
+
+
+def test_the_newest_completed_scan_is_the_one_bundled(env, tmp_path):
+    env["service"].scan_now(env["build_id"])
+    env["scanner"].findings = [
+        Finding(kind=base.VULNERABILITY, severity="high", identifier="CVE-NEW", package_name="curl"),
+    ]
+    env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        build = session.get(Build, env["build_id"])
+        env["service"].write_artifacts(build, tmp_path / "security")
+    report = json.loads((tmp_path / "security" / "scan.json").read_text())
+    assert [f["identifier"] for f in report["findings"]] == ["CVE-NEW"]
+
+
+def test_the_bundle_never_carries_a_secret_value(env, tmp_path):
+    env["scanner"].findings = [
+        Finding(kind=base.SECRET, severity="critical", identifier="aws-access-key",
+                target="/app/credentials:1", masked_match="redacted, 40 characters"),
+    ]
+    env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        build = session.get(Build, env["build_id"])
+        env["service"].write_artifacts(build, tmp_path / "security")
+    blob = "".join(path.read_text() for path in (tmp_path / "security").iterdir())
+    assert "redacted, 40 characters" in blob
+    assert "/app/credentials:1" in blob
+    assert "masked_match" in blob and "AKIA" not in blob
+
+
+def test_a_bundle_made_through_the_api_includes_the_security_folder(api):
+    import tarfile
+
+    build_id = _ready_build(api)
+    api.post(f"/api/builds/{build_id}/airgap", json={})
+    with api.state["session_factory"]() as session:
+        bundle = Path(session.get(Build, build_id).airgap_path)
+    with tarfile.open(bundle) as archive:
+        names = archive.getnames()
+    assert any("/security/SECURITY.txt" in name for name in names)
+    assert any("/security/scan.json" in name for name in names)
+    # Every file in the bundle is covered by its checksum list.
+    with tarfile.open(bundle) as archive:
+        sums = archive.extractfile(next(n for n in names if n.endswith("SHA256SUMS"))).read().decode()
+    assert "security/SECURITY.txt" in sums and "security/scan.json" in sums
