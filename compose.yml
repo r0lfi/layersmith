@@ -14,7 +14,7 @@ services:
   layersmith:
     image: ghcr.io/r0lfi/layersmith:latest
     # Pin a release in production, for example:
-    #   image: ghcr.io/r0lfi/layersmith:0.2.0
+    #   image: ghcr.io/r0lfi/layersmith:0.2.1
     container_name: layersmith
     restart: unless-stopped
 
