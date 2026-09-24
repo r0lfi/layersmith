@@ -58,6 +58,8 @@ export interface Scan {
   database: { version?: string | null; updated_at?: string | null; offline: boolean };
   /** Whether the scan reused the stored export or made a temporary one. */
   archive_source?: string | null;
+  /** Set when the scanner named an image identity LayerSmith did not expect. */
+  identity_note?: string | null;
   counts: Record<string, Record<string, number>>;
   severity: Record<Severity, number>;
   total: number;

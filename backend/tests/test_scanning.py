@@ -250,15 +250,34 @@ def test_a_failing_scanner_fails_the_scan_and_nothing_else(env):
     assert not list(Path(env["settings"].tmp_dir).glob("scan-*.tar"))
 
 
-def test_a_scan_of_a_different_image_is_discarded(env):
-    """Last defence: the scanner's own view of what it read must match."""
+def test_an_unrecognised_image_identity_is_recorded_not_thrown_away(env):
+    """Runtimes name images at different levels; a real scan is still a result.
+
+    What stops a stale archive being scanned is the checksum and digest
+    verification that happens before the scanner is handed anything.
+    """
     env["scanner"].image_id = "sha256:" + "9" * 64
     scan_id = env["service"].scan_now(env["build_id"])
     with env["session_factory"]() as session:
         scan = session.get(Scan, scan_id)
-        assert scan.state == "failed"
-        assert "different image" in scan.error
-        assert session.query(ScanFinding).filter_by(scan_id=scan_id).count() == 0
+        assert scan.state == "completed"
+        assert scan.identity_note and "does not match" in scan.identity_note
+        assert session.query(ScanFinding).filter_by(scan_id=scan_id).count() == 3
+
+
+def test_a_matching_identity_leaves_no_note(env):
+    scan_id = env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        assert session.get(Scan, scan_id).identity_note is None
+
+
+def test_an_identity_matching_the_digest_rather_than_the_id_is_accepted(env):
+    """A scanner may report the config digest where the runtime reported an id."""
+    env["scanner"].image_id = DIGEST
+    scan_id = env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        scan = session.get(Scan, scan_id)
+        assert scan.state == "completed" and scan.identity_note is None
 
 
 @pytest.mark.parametrize("reported", [

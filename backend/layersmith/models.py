@@ -148,6 +148,10 @@ class Scan(Base):
     #: existing_export | temporary_export - troubleshooting detail, not a
     #: headline: it explains why one scan took much longer than another.
     archive_source: Mapped[str | None] = mapped_column(String(24))
+    #: Set when the scanner named an image identity we do not recognise.
+    #: Not a failure: runtimes identify images at different levels, and the
+    #: archive itself is verified before it is ever handed over.
+    identity_note: Mapped[str | None] = mapped_column(Text)
 
     #: {kind: {severity: count}}, so a new finding kind needs no migration.
     counts: Mapped[dict] = mapped_column(JSON, default=dict)

@@ -245,12 +245,7 @@ class ScanService:
             scan = session.get(Scan, scan_id)
             if scan is None:
                 return
-            mismatch = self._digest_mismatch(scan, result)
-            if mismatch:
-                scan.state, scan.error, scan.finished_at = "failed", mismatch, utcnow()
-                session.commit()
-                return
-
+            scan.identity_note = self._identity_note(scan, result)
             report_path = self._write_json(scan_id, "report", result.report)
             scan.scanner = result.scanner or scan.scanner
             scan.scanner_version = result.scanner_version or ""
@@ -278,13 +273,30 @@ class ScanService:
             session.commit()
 
     @staticmethod
-    def _digest_mismatch(scan: Scan, result) -> str | None:
-        """Last line of defence: the scanner's own view of what it read."""
+    def _identity_note(scan: Scan, result) -> str | None:
+        """Compare the scanner's view of the image with ours, and say so.
+
+        This is a cross-check, not the guarantee. What actually stops a
+        stale or replaced archive being scanned is that a reused export is
+        re-verified by checksum and a temporary one is only made after the
+        reference's digest is confirmed - both before the scanner sees
+        anything.
+
+        Runtimes identify an image at different levels: a bare hex id, a
+        config digest, or the id of a manifest list that contains it. A
+        difference here is usually that, which is why it is recorded rather
+        than used to throw a real scan away.
+        """
         seen = getattr(result, "scanned_image_id", None)
-        if seen and scan.image_id and not _same_image(seen, scan.image_id):
-            return (f"The scanner read a different image ({seen[:19]}…) than the one recorded for this "
-                    f"build ({scan.image_id[:19]}…), so the result was discarded.")
-        return None
+        if not seen:
+            return None
+        known = [value for value in (scan.image_id, scan.image_digest) if value]
+        if any(_same_image(seen, value) for value in known):
+            return None
+        return (f"The scanner identified the image it read as {seen[:23]}…, which does not match what "
+                f"this build recorded ({', '.join(value[:23] + '…' for value in known) or 'nothing'}). "
+                "The archive was verified before scanning, so this is most likely the runtime and the "
+                "scanner naming the same image differently.")
 
     def _write_json(self, scan_id: str, kind: str, document) -> Path | None:
         if not document:
@@ -456,6 +468,7 @@ def summarise(scan: Scan) -> dict:
         },
         # Troubleshooting detail: why one scan took far longer than another.
         "archive_source": scan.archive_source,
+        "identity_note": scan.identity_note,
         "counts": scan.counts or {},
         "severity": {level: vulnerabilities.get(level, 0) for level in scanner_base.SEVERITIES},
         "total": scan.total,

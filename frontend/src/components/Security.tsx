@@ -178,6 +178,8 @@ export function SecurityPanel({ buildId, scannerAvailable, scannerDetail }: {
 
       {selected?.state === "failed" && <Banner>The scan did not finish: {selected.error}</Banner>}
 
+      {selected?.identity_note && <Banner kind="warn">{selected.identity_note}</Banner>}
+
       {selected && selected.state !== "failed" && (
         <>
           <SeverityBar
