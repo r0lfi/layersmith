@@ -516,6 +516,9 @@ def test_a_bundle_carries_the_scan_that_was_made(env, tmp_path):
 
     text = (tmp_path / "security" / "SECURITY.txt").read_text()
     assert "vulnerability:" in text and "1 critical" in text
+    # A kind that was scanned and came back empty says so, rather than being
+    # left out as though it had never been looked for.
+    assert "secret:" in text
     # An air-gapped reader cannot check anything themselves, so the bundle
     # must not let a scan be mistaken for a clean bill of health.
     assert "not a statement that the" in text

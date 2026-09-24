@@ -411,9 +411,12 @@ rule, a file and a line - never the value.
 
 def _security_text(scan: Scan, summary: dict) -> str:
     lines = []
-    for kind, counts in sorted((scan.counts or {}).items()):
+    for kind in scan.kinds or []:
+        counts = (scan.counts or {}).get(kind) or {}
         detail = ", ".join(f"{count} {severity}" for severity, count in counts.items() if count)
-        lines.append(f"{kind + ':':<20}{detail or 'none'}")
+        lines.append(f"{kind + ':':<20}{detail or 'nothing found'}")
+    if not lines:
+        lines = ["Nothing was scanned for."]
     database = f"v{scan.database_version}" if scan.database_version else "unknown"
     if scan.database_updated_at:
         database += f", updated {scan.database_updated_at:%Y-%m-%d}"
