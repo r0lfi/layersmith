@@ -106,7 +106,12 @@ jobs:
       # LayerSmith uses for the images its users build: the scanner is given
       # an archive, never the Docker socket.
       - name: Export the image
-        run: docker save -o /tmp/layersmith-ci.tar layersmith:ci
+        run: |
+          docker save -o /tmp/layersmith-ci.tar layersmith:ci
+          # The scanner runs with every capability dropped, so it cannot read
+          # a file it does not own - and docker save writes 0600. This is the
+          # same reason LayerSmith writes its own image archives readable.
+          chmod 644 /tmp/layersmith-ci.tar
 
       - name: Scan for fixable CRITICAL and HIGH
         run: |
