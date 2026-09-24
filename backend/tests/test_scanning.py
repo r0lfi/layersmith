@@ -250,6 +250,18 @@ def test_a_failing_scanner_fails_the_scan_and_nothing_else(env):
     assert not list(Path(env["settings"].tmp_dir).glob("scan-*.tar"))
 
 
+def test_no_note_when_the_archive_was_matched_by_checksum(env):
+    """A reused export is proven by checksum; the scanner's view adds nothing."""
+    env["backend"].archive_format = "docker-archive"
+    env["backend"].archive_formats = ("docker-archive",)
+    env["scanner"].image_id = "sha256:" + "9" * 64
+    scan_id = env["service"].scan_now(env["build_id"])
+    with env["session_factory"]() as session:
+        scan = session.get(Scan, scan_id)
+        assert scan.archive_source == EXISTING_EXPORT
+        assert scan.state == "completed" and scan.identity_note is None
+
+
 def test_an_unrecognised_image_identity_is_recorded_not_thrown_away(env):
     """Runtimes name images at different levels; a real scan is still a result.
 

@@ -290,6 +290,12 @@ class ScanService:
         seen = getattr(result, "scanned_image_id", None)
         if not seen:
             return None
+        if scan.archive_source == EXISTING_EXPORT:
+            # The archive was matched by checksum against the one written for
+            # this image. The scanner's opinion adds nothing to that, and a
+            # note on every single scan would only teach people to ignore
+            # notes.
+            return None
         known = [value for value in (scan.image_id, scan.image_digest) if value]
         if any(_same_image(seen, value) for value in known):
             return None

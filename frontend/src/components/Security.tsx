@@ -178,8 +178,6 @@ export function SecurityPanel({ buildId, scannerAvailable, scannerDetail }: {
 
       {selected?.state === "failed" && <Banner>The scan did not finish: {selected.error}</Banner>}
 
-      {selected?.identity_note && <Banner kind="warn">{selected.identity_note}</Banner>}
-
       {selected && selected.state !== "failed" && (
         <>
           <SeverityBar
@@ -197,6 +195,7 @@ export function SecurityPanel({ buildId, scannerAvailable, scannerDetail }: {
                 )}
                 {selected.database?.offline && " (imported offline)"}. A scan reflects what that database
                 knew at that moment, not what is true today.
+                {selected.identity_note && <><br />{selected.identity_note}</>}
               </>
             ) : selected.state === "exporting" ? (
               "Exporting the image so it can be scanned without giving the scanner access to the container runtime. Large images take a while."
