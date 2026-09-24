@@ -114,11 +114,23 @@ def _build_json(build: Build, project: Project | None = None) -> dict:
         "packages": build.packages or [], "image_ref": build.image_ref, "image_id": build.image_id,
         "image_digest": build.image_digest, "image_size": build.image_size,
         "export_size": build.export_size, "export_sha256": build.export_sha256,
-        "has_export": bool(build.export_path), "has_airgap": bool(build.airgap_path),
+        # Whether the file is actually there, not just recorded: an archive
+        # removed from disk would otherwise be offered as a download that
+        # answers 404.
+        "has_export": _downloadable(build.export_path), "has_airgap": _downloadable(build.airgap_path),
         "airgap_size": build.airgap_size, "airgap_sha256": build.airgap_sha256,
         "started_at": build.started_at, "finished_at": build.finished_at, "created_at": build.created_at,
         "duration_seconds": build.duration_seconds,
     }
+
+
+def _downloadable(path_value: str | None) -> bool:
+    if not path_value:
+        return False
+    try:
+        return Path(path_value).is_file()
+    except OSError:
+        return False
 
 
 def _load_project(session, project_id: str) -> Project:

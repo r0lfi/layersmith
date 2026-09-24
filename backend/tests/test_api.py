@@ -180,3 +180,21 @@ def test_build_log_websocket_replays_then_closes_for_finished_builds(client):
     with client.websocket_connect(f"/api/builds/{build['id']}/logs") as websocket:
         messages = [websocket.receive_json() for _ in range(3)]
     assert messages[0]["type"] == "log" and "LayerSmith" in messages[0]["line"]
+
+
+def test_a_removed_archive_is_not_offered_for_download(client):
+    """The record outlives the file; the UI must not offer a 404."""
+    project = client.post("/api/projects", json={
+        "name": "gone", "template": "Minimal",
+        "spec": {"base": {"distribution": "Alpine", "version": "3.22"}}}).json()
+    build = client.post(f"/api/projects/{project['id']}/builds", json={}).json()
+    run_pending_build(client, build["id"])
+    assert client.get(f"/api/builds/{build['id']}").json()["has_export"] is True
+
+    with client.state["session_factory"]() as session:
+        from pathlib import Path
+        Path(session.get(Build, build["id"]).export_path).unlink()
+
+    body = client.get(f"/api/builds/{build['id']}").json()
+    assert body["has_export"] is False
+    assert client.get(f"/api/builds/{build['id']}/download/export").status_code == 404
