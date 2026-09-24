@@ -97,8 +97,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # -f Containerfile: this repository has no Dockerfile, and without it
+      # the build fails and every later step reports something misleading.
       - name: Build the application image
-        run: docker build -t layersmith:ci .
+        run: docker build -f Containerfile -t layersmith:ci .
 
       # The image is exported and scanned as a file - the same arrangement
       # LayerSmith uses for the images its users build: the scanner is given
@@ -117,10 +119,13 @@ jobs:
             --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress
 
       # Everything else, including what has no fix yet, so it is visible
-      # without failing a build over something nobody can act on.
+      # without failing a build over something nobody can act on. Runs even
+      # when the strict scan above failed - but not when there is no archive
+      # to scan, which would only produce a confusing second error.
       - name: Report everything else
         if: always()
         run: |
+          test -f /tmp/layersmith-ci.tar || { echo "No image archive: the build or export failed."; exit 0; }
           docker run --rm \
             --security-opt no-new-privileges --cap-drop ALL \
             -v /tmp/layersmith-ci.tar:/scan/image.tar:ro \

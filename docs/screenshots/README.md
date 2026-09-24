@@ -8,6 +8,8 @@ Used by the project README.
 | `create-image.png` | Create image wizard, ideally the review step with the generated Containerfile |
 | `build.png` | A build page with the live log |
 | `image-details.png` | A finished build: image identity, packages and downloads |
+| `security.png` | The Security panel on a build: severity counts, filters and findings |
+| `settings-security.png` | Settings -> Security: which scanner is in use and how old its data is |
 
 Guidelines:
 

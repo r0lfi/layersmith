@@ -94,6 +94,14 @@ and shows you the Containerfile it produced before anything is built.
 | --- | --- |
 | ![Build](docs/screenshots/build.png) | ![Image details](docs/screenshots/image-details.png) |
 
+Every finished image is scanned, if you configure a scanner. Severity counts
+filter the findings; a secret is reported as a rule, a file and a line, never
+as the value:
+
+![Scan findings](docs/screenshots/security.png)
+
+![Settings, Security](docs/screenshots/settings-security.png)
+
 ## Two kinds of image
 
 The documentation keeps these apart, and so should you:
@@ -107,15 +115,15 @@ The documentation keeps these apart, and so should you:
 
 | Tag | Meaning |
 | --- | --- |
-| `0.1.0` | an exact release — **recommended for production** |
-| `0.1`, `0` | newest patch within that minor/major line |
+| `0.2.0` | an exact release — **recommended for production** |
+| `0.2`, `0` | newest patch within that minor/major line |
 | `latest` | newest stable release |
 | `edge` | built from `main` on every merge; development, not stable |
 
 ```yaml
 services:
   layersmith:
-    image: ghcr.io/r0lfi/layersmith:0.1.0
+    image: ghcr.io/r0lfi/layersmith:0.2.0
 ```
 
 Prereleases (`v0.2.0-rc1`) publish only their exact tag; they never move

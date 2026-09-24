@@ -185,8 +185,28 @@ def settings() -> Settings:
     return _settings
 
 
+#: Paths that default to living under the data directory, and the name each
+#: one gets there.
+DERIVED_PATHS = {
+    "image_dir": "images", "build_dir": "builds", "upload_dir": "uploads",
+    "log_dir": "logs", "tmp_dir": "tmp", "scan_dir": "scans",
+}
+
+
 def reset_for_tests(**overrides) -> Settings:
-    """Replace the process settings; used by tests and by the CLI entrypoint."""
+    """Replace the process settings; used by tests and by the CLI entrypoint.
+
+    Moving the data directory moves everything that defaults to living under
+    it, unless the caller named that path too. Without this, redirecting the
+    data directory quietly left some paths pointing at the real one - which
+    a machine with a writable /data hides completely, and CI does not.
+    """
     global _settings
-    _settings = Settings(**{**load().__dict__, **overrides})
+    base = load()
+    if "data_dir" in overrides:
+        data_dir = Path(overrides["data_dir"])
+        for field, name in DERIVED_PATHS.items():
+            overrides.setdefault(field, data_dir / name)
+        overrides.setdefault("database_url", f"sqlite:///{data_dir / 'layersmith.db'}")
+    _settings = Settings(**{**base.__dict__, **overrides})
     return _settings

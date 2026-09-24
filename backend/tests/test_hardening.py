@@ -196,3 +196,17 @@ def test_environment_pinned_paths_cannot_be_changed_from_the_ui(client, tmp_path
 def test_data_directory_is_not_movable_from_the_ui(client, tmp_path):  # noqa: F811
     response = client.put("/api/settings/storage", json={"paths": {"data_dir": str(tmp_path / "nope")}})
     assert response.status_code == 422
+
+
+def test_redirecting_the_data_directory_moves_everything_under_it(tmp_path):
+    """Otherwise a test writes to the real /data on any host that has one."""
+    settings = config.reset_for_tests(data_dir=tmp_path)
+    for directory in settings.directories:
+        assert directory == tmp_path or tmp_path in directory.parents, directory
+    assert str(tmp_path) in settings.database_url
+
+
+def test_an_explicit_path_still_wins(tmp_path):
+    settings = config.reset_for_tests(data_dir=tmp_path, image_dir=tmp_path / "elsewhere")
+    assert settings.image_dir == tmp_path / "elsewhere"
+    assert settings.scan_dir == tmp_path / "scans"

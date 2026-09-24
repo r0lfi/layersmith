@@ -84,7 +84,7 @@ operations: `available`, `resolve_base`, `build`, `inspect`, `export`,
 `remove`. A remote agent backend implements the same five against a build
 host over SSH or HTTP, so the web application never touches a container
 runtime at all. `LAYERSMITH_AGENT_URL` and `LAYERSMITH_AGENT_TOKEN` are
-reserved for this. The agent itself is not part of 0.1.0.
+reserved for this. The agent itself is not part of 0.2.0.
 
 This is the right shape if the web UI is reachable by more people than you
 would trust with root on the build host.
@@ -149,7 +149,7 @@ location / {
 }
 ```
 
-## Known limitations in 0.1.0
+## Known limitations in 0.2.0
 
 Things a reviewer should know before putting this anywhere sensitive:
 
