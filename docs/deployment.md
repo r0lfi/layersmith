@@ -169,6 +169,20 @@ Things a reviewer should know before putting this anywhere sensitive:
   queue behind it.
 * **SQLite is the default.** It is fine for one instance with one build
   worker; point `LAYERSMITH_DATABASE_URL` at PostgreSQL if you want more.
+* **Scanning reports; it never blocks.** A build with findings still
+  produces an image, and LayerSmith will not call an image secure. Policy
+  enforcement is not implemented.
+* **A scan is a point in time.** It records what one vulnerability database
+  knew on one date. Nothing rescans on its own, so an old scan shown next to
+  an image is exactly that - old.
+* **Image archives are written world-readable** (`0644`). They are served
+  over the unauthenticated API anyway, and the scanner - which runs with
+  every capability dropped - has to be able to read them. The data directory
+  is the access boundary.
+* **Enabling a scanner lets LayerSmith start scanner containers** through
+  the same runtime it builds with. The scanner container itself gets no
+  socket, no capabilities and one read-only mount; see
+  [scanning.md](scanning.md).
 
 ## Authentication
 
