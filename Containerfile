@@ -26,7 +26,7 @@ RUN npm run build
 # from the official image rather than curled from a release URL at build
 # time, so its content is pinned through the base image instead of being
 # fetched unverified.
-FROM docker.io/library/docker:27-cli AS cli
+FROM docker.io/library/docker:29-cli AS cli
 
 
 # ------------------------------------------------------------- runtime
