@@ -38,7 +38,7 @@ from layersmith.backends.base import BuildError
 from layersmith.models import Build, Scan, ScanFinding, utcnow
 from layersmith.scanners import base as scanner_base
 from layersmith.scanners.base import ScannerError, ScannerUnavailable
-from layersmith.services.builds import sha256_file
+from layersmith.services.builds import readable_artifact, sha256_file
 
 EXISTING_EXPORT = "existing_export"
 TEMPORARY_EXPORT = "temporary_export"
@@ -120,7 +120,10 @@ class ScanService:
             return None  # readable file, wrong shape for this scanner
         if sha256_file(export) != build.export_sha256:
             return None
-        return export
+        # The scanner runs with every capability dropped, so it cannot read a
+        # file it does not own unless the mode allows it. Older exports were
+        # written before that was understood.
+        return readable_artifact(export)
 
     def _export_format(self) -> str:
         """The first format the scanner reads that this runtime can write."""
@@ -157,6 +160,7 @@ class ScanService:
             self._verify_reference(reference, digest)
             self.backend.export(reference, temporary, on_log or (lambda _line: None),
                                 archive_format=archive_format)
+            readable_artifact(temporary)
             yield ImageArchive(temporary, TEMPORARY_EXPORT, archive_format)
         finally:
             # Success or failure: a scan does not leave archives behind.

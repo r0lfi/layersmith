@@ -551,3 +551,19 @@ def test_a_bundle_made_through_the_api_includes_the_security_folder(api):
     with tarfile.open(bundle) as archive:
         sums = archive.extractfile(next(n for n in names if n.endswith("SHA256SUMS"))).read().decode()
     assert "security/SECURITY.txt" in sums and "security/scan.json" in sums
+
+
+def test_an_archive_handed_to_the_scanner_is_readable(env):
+    """The scanner drops every capability, so it cannot bypass file modes."""
+    env["export"].chmod(0o600)
+    env["backend"].archive_format = "docker-archive"
+    env["backend"].archive_formats = ("docker-archive",)
+    with env["service"].archive_for(env["build_id"]) as archive:
+        assert archive.source == EXISTING_EXPORT
+        assert archive.path.stat().st_mode & 0o044, "the scanner would get permission denied"
+
+
+def test_a_temporary_export_is_readable_too(env):
+    with env["service"].archive_for(env["build_id"]) as archive:
+        assert archive.source == TEMPORARY_EXPORT
+        assert archive.path.stat().st_mode & 0o044

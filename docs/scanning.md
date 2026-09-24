@@ -124,6 +124,13 @@ No socket. No `--privileged`. No host directories. The `z` (shared) SELinux
 relabel is deliberate: `Z` would give the archive a private label and make a
 reused export unreadable to LayerSmith itself.
 
+Because every capability is dropped, the scanner cannot bypass file
+permissions — not even as root inside its own container. LayerSmith
+therefore writes its image archives mode `0644`; they are already served
+over HTTP without authentication, so the data directory is the access
+boundary rather than the file mode. Without that, scanning fails with
+`permission denied` on any host whose umask is `077`.
+
 LayerSmith starts that container through the runtime it already uses to
 build. That is LayerSmith spending a privilege it already holds; the scanner
 is given none of it.

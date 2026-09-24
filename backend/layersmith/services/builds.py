@@ -49,6 +49,24 @@ No network access is required to load this image.
 """
 
 
+#: Mode for the artifacts LayerSmith produces: image archives and bundles.
+#: They are already served over HTTP without authentication, so the data
+#: directory is the access boundary, not the file mode - and a scanner
+#: running with every capability dropped cannot read a file it does not own
+#: unless the mode says it may. Without this, scanning silently fails on any
+#: host where the process umask is 077.
+ARTIFACT_MODE = 0o644
+
+
+def readable_artifact(path: Path) -> Path:
+    """Give an artifact the mode everything downstream expects."""
+    try:
+        path.chmod(ARTIFACT_MODE)
+    except OSError:
+        pass  # a read-only or unusual filesystem must not fail the build
+    return path
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -272,6 +290,7 @@ class BuildService:
                 export = Path(self.settings.image_dir) / export_filename(project_snapshot["repository"],
                                                                          build.version)
                 size = self.backend.export(reference, export, lambda line: self._emit(build_id, line))
+                readable_artifact(export)
                 checksum = sha256_file(export)
 
                 build.image_id, build.image_digest, build.image_size = info.image_id, info.digest, info.size
@@ -349,6 +368,7 @@ class BuildService:
                     archive.add(path, arcname=str(Path(stem) / path.relative_to(staging)), recursive=False)
             shutil.rmtree(staging, ignore_errors=True)
 
+            readable_artifact(bundle)
             build.airgap_path = str(bundle)
             build.airgap_size = bundle.stat().st_size
             build.airgap_sha256 = sha256_file(bundle)
