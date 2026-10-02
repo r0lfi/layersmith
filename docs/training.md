@@ -59,6 +59,7 @@ on a 4-core VM with Podman). Time includes the post-build checks.
 | Hugging Face Fine-tuning + TensorBoard + JupyterLab | 13.5 GB | 4.8 GB | 28 min |
 | LLaMA-Factory + TensorBoard | 11.4 GB | 3.8 GB | 28 min |
 | Advanced, FlashAttention stack + DeepSpeed + TensorBoard | 28.0 GB | 9.8 GB | 48 min |
+| Advanced, default stack + DeepSpeed + lm-eval + TensorBoard | 29.2 GB | 10.4 GB | 49 min |
 | Dataset Preparation - CPU + JupyterLab | 0.9 GB | 0.3 GB | 4 min |
 
 The CUDA development base that DeepSpeed needs roughly doubles the image.
