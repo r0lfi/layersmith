@@ -137,18 +137,30 @@ def torch_info(steps, r):
 
 
 def bitsandbytes_library():
-    """bitsandbytes must ship a native library for the CUDA version PyTorch uses."""
+    """bitsandbytes must ship a native library it will pick for PyTorch's CUDA version.
+
+    Same rule as bitsandbytes' own loader: an exact match, else the highest
+    packaged version of the same major below the runtime (12.9 -> 12.8), else
+    the lowest above it. No cross-major fallback.
+    """
     import importlib.util
+    import re
 
     import torch
 
-    spec = importlib.util.find_spec("bitsandbytes")
-    folder = Path(spec.origin).parent
-    wanted = "libbitsandbytes_cuda" + (torch.version.cuda or "").replace(".", "")
-    libraries = sorted(p.name for p in folder.glob("libbitsandbytes_*.so"))
-    if not any(name.startswith(wanted) for name in libraries):
-        raise RuntimeError(f"no {wanted}*.so in bitsandbytes (has: {', '.join(libraries)})")
-    return f"{wanted} present"
+    folder = Path(importlib.util.find_spec("bitsandbytes").origin).parent
+    major, minor = (int(x) for x in torch.version.cuda.split(".")[:2])
+    shipped = []
+    for path in folder.glob("libbitsandbytes_cuda*.so"):
+        match = re.fullmatch(r"libbitsandbytes_cuda(\d+)(\d)\.so", path.name)
+        if match and int(match.group(1)) == major:
+            shipped.append((int(match.group(2)), path.name))
+    if not shipped:
+        raise RuntimeError(f"bitsandbytes has no CUDA {major}.x library")
+    below = [s for s in shipped if s[0] <= minor]
+    chosen = max(below) if below else min(shipped)
+    exact = "exact match" if chosen[0] == minor else f"closest for CUDA {major}.{minor}"
+    return f"{chosen[1]} ({exact})"
 
 
 def deepspeed_info(steps):

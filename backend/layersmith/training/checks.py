@@ -80,7 +80,9 @@ def summarise(build_status: str, recipe: dict, recorded: dict | None, image: str
     results = recorded.get("results") or {}
     rows = []
 
-    image_status = "passed" if build_status == "ready" else "failed" if build_status == "failed" else "not_run"
+    # The image exists from the moment the checks start, before it is exported.
+    built = build_status in ("testing", "exporting", "ready") or bool(results)
+    image_status = "passed" if built else "failed" if build_status == "failed" else "not_run"
     rows.append({"id": "image", "status": image_status, "label": LABELS["image"][image_status],
                  "meaning": MEANING["image"], "summary": MEANING["image"] if image_status == "passed" else ""})
 

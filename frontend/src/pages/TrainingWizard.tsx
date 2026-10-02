@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, TrainingCatalog, TrainingRequest, TrainingResolve } from "../api";
+import { api, formatBytes, formatDuration, TrainingCatalog, TrainingRequest, TrainingResolve } from "../api";
 import { Banner, Card, Field } from "../components/ui";
 import { CodeBlock, ExportList, ToolCard } from "../components/Training";
 
@@ -477,9 +477,24 @@ export default function TrainingWizard({ onLeave }: { onLeave: () => void }) {
                     <ExportList contents={resolved.export_contents} />
                   </>
                 )}
+                <h4>Size and build time</h4>
+                {recipe.reference ? (
+                  <p className="faint">
+                    Reference build of {recipe.reference.exact ? "this exact recipe" : "this profile and stack"}
+                    {recipe.reference.exact ? "" : ` (add-ons: ${recipe.reference.addons.join(", ") || "none"})`} on{" "}
+                    {recipe.reference.date}, {recipe.reference.host}: image {formatBytes(recipe.reference.image_bytes)},
+                    archive {formatBytes(recipe.reference.archive_bytes)}, build and checks{" "}
+                    {formatDuration(recipe.reference.build_seconds)}. Your build is measured and shown on its own page.
+                  </p>
+                ) : (
+                  <p className="faint">
+                    No reference build of this combination yet, so no estimate is shown. The build page shows the
+                    measured size and time.
+                  </p>
+                )}
                 <p className="faint">
                   After the build LayerSmith runs three checks in the image without network: dependencies, a CPU smoke
-                  test and the offline example. Image size and build time are measured and shown on the build page.
+                  test and the offline example.
                 </p>
                 {recipe.notes.map((note) => <Banner kind="info" key={note}>{note}</Banner>)}
               </div>

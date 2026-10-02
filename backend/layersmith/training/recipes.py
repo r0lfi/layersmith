@@ -309,7 +309,24 @@ def resolve(request: dict | None, architecture: str | None = None) -> dict:
         "ports": ports,
         "notes": notes,
         "examples": profile["examples"],
+        "reference": reference_for(profile["id"], stack_id, addons),
     }
+
+
+def reference_for(profile_id: str, stack_id: str, addons: list[str]) -> dict | None:
+    """The closest reference build: same profile and stack, preferring the same add-ons.
+
+    Says whether it matches exactly, so an estimate is never presented as a
+    measurement of this exact combination.
+    """
+    candidates = [r for r in catalog.REFERENCE_BUILDS if r["profile"] == profile_id and r["stack"] == stack_id]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda r: len(set(r["addons"]) & set(addons)) - len(set(r["addons"]) ^ set(addons)))
+    devel = any(catalog.ADDONS[a].get("needs_devel_base") for a in addons)
+    if devel != any(catalog.ADDONS[a].get("needs_devel_base") for a in best["addons"]):
+        return None  # a different base image: the numbers would mislead
+    return {**best, "exact": sorted(best["addons"]) == sorted(addons)}
 
 
 def is_customized(spec: dict) -> bool:

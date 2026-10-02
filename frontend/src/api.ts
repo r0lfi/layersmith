@@ -97,6 +97,10 @@ export interface TrainingRecipe {
   extra_python: string[];
   ports: { port: number; name: string }[];
   notes: string[];
+  reference?: {
+    date: string; host: string; image_bytes: number; archive_bytes: number; build_seconds: number;
+    checks: string[]; addons: string[]; exact: boolean; also?: string;
+  } | null;
 }
 
 export interface TrainingProfile {

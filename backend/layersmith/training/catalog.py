@@ -579,3 +579,29 @@ PROFILES = [
 ]
 
 PROFILES_BY_ID = {profile["id"]: profile for profile in PROFILES}
+
+#: Reference builds of the standard recipes: what was actually built and
+#: checked, where, and what it measured. Shown as the basis for size and time
+#: estimates before a build; a build's own measurements replace them after.
+#: GPU checks are listed only when one has really been run on recorded hardware.
+REFERENCE_BUILDS = [
+    {"profile": "hf-finetune", "stack": "hf-cu129", "addons": ["tensorboard", "jupyter"],
+     "date": "2026-10-02", "host": "8-core x86_64 VM, Docker 29, no GPU",
+     "image_bytes": 13_511_904_794, "archive_bytes": 4_750_807_040, "build_seconds": 1679,
+     "checks": ["image", "deps", "cpu", "offline"], "gpu": None},
+    {"profile": "llama-factory", "stack": "llamafactory-cu124", "addons": ["tensorboard"],
+     "date": "2026-10-02", "host": "8-core x86_64 VM, Docker 29, no GPU",
+     "image_bytes": 11_366_620_357, "archive_bytes": 3_815_855_104, "build_seconds": 1698,
+     "checks": ["image", "deps", "cpu", "offline"], "gpu": None,
+     "also": "LLaMA Board login (401 without password) and JupyterLab token checked"},
+    {"profile": "pytorch-advanced", "stack": "fa2-cu128", "addons": ["tensorboard", "deepspeed", "flash-attn"],
+     "date": "2026-10-02", "host": "8-core x86_64 VM, Docker 29, no GPU",
+     "image_bytes": 27_967_410_265, "archive_bytes": 9_754_527_232, "build_seconds": 2884,
+     "checks": ["image", "deps", "cpu", "offline"], "gpu": None,
+     "also": "DeepSpeed builds from source with nvcc 12.8; the FlashAttention CUDA extension loads"},
+    {"profile": "dataset-prep", "stack": "cpu-data", "addons": ["jupyter"],
+     "date": "2026-10-02", "host": "4-core x86_64 VM, Podman 5.8, no GPU",
+     "image_bytes": 897_818_710, "archive_bytes": 291_542_016, "build_seconds": 261,
+     "checks": ["image", "deps", "cpu", "offline"], "gpu": None,
+     "also": "Air-gap bundle checksums verified and the archive loaded with podman load"},
+]

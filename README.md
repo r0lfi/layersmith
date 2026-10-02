@@ -81,6 +81,12 @@ and shows you the Containerfile it produced before anything is built.
   and `INSTALL.txt` in one archive that loads with no network access.
 - **Optional image scanning** — pluggable, off until you configure a scanner,
   and it reports rather than blocks. See [docs/scanning.md](docs/scanning.md).
+- **LLM Training & Fine-tuning profiles** — Hugging Face fine-tuning (LoRA,
+  QLoRA, DPO), advanced PyTorch training (full fine-tuning, continued
+  pretraining, FSDP, DeepSpeed, FlashAttention), LLaMA-Factory with its web UI,
+  and CPU dataset preparation. Hash-locked Python stacks, checks run inside the
+  image after each build (dependencies, CPU smoke test, offline example), and
+  a Getting started for the exact image. See [docs/training.md](docs/training.md).
 - **Podman or Docker** as the build backend.
 - **API first** — the web UI uses the same HTTP API you can script against.
 
