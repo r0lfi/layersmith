@@ -395,6 +395,9 @@ h4 { margin: 0.9rem 0 0.3rem; font-size: 0.9rem; font-weight: 620; }
 .export-list ul { margin: 0.2rem 0; padding-left: 1.1rem; font-size: 0.85rem; }
 
 @media (max-width: 720px) {
+  .table td > * { min-width: 0; }
+  .table td { overflow-wrap: anywhere; }
+  .truncate-long { white-space: normal; overflow-wrap: anywhere; }
   .check-row > summary { grid-template-columns: 1.5rem 1fr; }
   .check-summary { grid-column: 2; }
   .facts { grid-template-columns: 1fr; }
