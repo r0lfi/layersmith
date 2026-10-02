@@ -159,7 +159,7 @@ The documentation keeps these apart, and so should you:
 
 | Tag | Meaning |
 | --- | --- |
-| `0.2.1` | an exact release — **recommended for production** |
+| `0.3.0` | an exact release — **recommended for production** |
 | `0.2`, `0` | newest patch within that minor/major line |
 | `latest` | newest stable release |
 | `edge` | built from `main` on every merge; development, not stable |
@@ -167,7 +167,7 @@ The documentation keeps these apart, and so should you:
 ```yaml
 services:
   layersmith:
-    image: ghcr.io/r0lfi/layersmith:0.2.1
+    image: ghcr.io/r0lfi/layersmith:0.3.0
 ```
 
 Prereleases (`v0.2.0-rc1`) publish only their exact tag; they never move
