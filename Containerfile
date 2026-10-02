@@ -60,6 +60,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
 
+# Debian fixes reach the archive before the python base image is rebuilt;
+# take them now, so a release does not ship a known, already fixed issue.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Runtime dependencies only: no compiler or build tooling is kept here.
