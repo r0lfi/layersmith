@@ -95,6 +95,8 @@ p { margin: 0.4rem 0; }
 .card-head h2, .card-head h3 { margin-right: auto; }
 
 .grid { display: grid; gap: 1rem; }
+/* Grid items may shrink below their content, so wide code blocks scroll inside themselves. */
+.grid > * { min-width: 0; }
 .grid.stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .grid.cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
@@ -185,6 +187,7 @@ label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-botto
 .table tbody tr:hover { background: var(--surface-2); }
 
 .mono { font-family: var(--mono); font-size: 0.84rem; }
+.table td.mono { overflow-wrap: anywhere; }
 .dim { color: var(--text-dim); }
 .faint { color: var(--text-faint); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 24ch; display: inline-block; vertical-align: bottom; }

@@ -87,7 +87,8 @@ def summarise(build_status: str, recipe: dict, recorded: dict | None, image: str
     for check in ("deps", "cpu", "offline"):
         result = results.get(check)
         status = result.get("status", "failed") if result else "not_run"
-        status = status if status in ("passed", "failed") else "failed"
+        if result and status not in ("passed", "failed"):
+            status = "failed"  # a result without a clear verdict is not a pass
         summary = _step_summary(result) if result else (
             "Running…" if build_status == "testing" else "Not run for this build.")
         rows.append({"id": check, "status": status, "label": LABELS[check][status], "meaning": MEANING[check],

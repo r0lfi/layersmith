@@ -197,7 +197,9 @@ def resolve(request: dict | None, architecture: str | None = None) -> dict:
                                {"stack": profile["stacks"][0]}, f"Use {catalog.STACKS[profile['stacks'][0]]['name']}")
     stack = catalog.STACKS[stack_id]
 
-    addons = list(dict.fromkeys(request.get("addons") or []))
+    # No "addons" key means the profile's defaults; an empty list means none.
+    requested = request.get("addons")
+    addons = list(dict.fromkeys(profile["default_addons"] if requested is None else requested))
     for addon in addons:
         if addon not in catalog.ADDONS:
             raise TrainingConflict(f"Unknown add-on: {addon}")
