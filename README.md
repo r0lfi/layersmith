@@ -81,7 +81,8 @@ and shows you the Containerfile it produced before anything is built.
   and `INSTALL.txt` in one archive that loads with no network access.
 - **Optional image scanning** — pluggable, off until you configure a scanner,
   and it reports rather than blocks. See [docs/scanning.md](docs/scanning.md).
-- **LLM Training & Fine-tuning profiles** — Hugging Face fine-tuning (LoRA,
+- **LLM training templates** — built into LayerSmith, next to the other
+  templates: Hugging Face fine-tuning (LoRA,
   QLoRA, DPO), advanced PyTorch training (full fine-tuning, continued
   pretraining, FSDP, DeepSpeed, FlashAttention), LLaMA-Factory with its web UI,
   and CPU dataset preparation. Hash-locked Python stacks, checks run inside the
@@ -108,13 +109,18 @@ as the value:
 
 ![Settings, Security](docs/screenshots/settings-security.png)
 
-## LLM training images for air-gapped environments
+## Templates for LLM training and fine-tuning
+
+This is part of LayerSmith, not a separate product or image: the same
+LayerSmith container you already run offers it as another category in the
+**Create image** wizard, next to Developer, Ansible and the rest. What it
+builds is an ordinary image of yours, like any other LayerSmith build.
 
 Building a training environment for a machine without internet access is
 mostly about getting a long list of versions to agree - PyTorch and its CUDA
 build, Transformers, PEFT, TRL, bitsandbytes, DeepSpeed - and then proving the
-result works before it leaves the connected side. LayerSmith does that as a
-category of its own: **Create image → LLM Training & Fine-tuning**.
+result works before it leaves the connected side. Choose
+**Create image → LLM Training & Fine-tuning**.
 
 - **Four profiles** — Hugging Face fine-tuning (LoRA, QLoRA, DPO; recommended),
   advanced PyTorch training (full fine-tuning, continued pretraining, FSDP,

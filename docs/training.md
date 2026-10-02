@@ -1,7 +1,9 @@
-# LLM Training & Fine-tuning
+# LLM Training & Fine-tuning templates
 
-LayerSmith can build ready-to-run environments for training and fine-tuning
-language models. It **builds and documents** the environment; the training
+A category of templates in the LayerSmith **Create image** wizard, shipped in
+the normal LayerSmith image - nothing extra to install or configure. With it,
+LayerSmith builds ready-to-run images for training and fine-tuning language
+models. It **builds and documents** the environment; the training
 itself runs in the finished image, on your own GPU machine. Model weights and
 training data are never part of the image: you mount them when you start it.
 

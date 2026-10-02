@@ -238,7 +238,7 @@ export function TrainingPanel({ buildId, detail, ready, onChange }: {
 
   return (
     <>
-      <Card title={`Training environment: ${recipe.profile_name}`}>
+      <Card title={`LLM training template: ${recipe.profile_name}`}>
         {detail.customized && (
           <Banner kind="warn">
             This image adds packages, files or scripts to the standard recipe. The checks below ran on this image;
