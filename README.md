@@ -108,6 +108,44 @@ as the value:
 
 ![Settings, Security](docs/screenshots/settings-security.png)
 
+## LLM training images for air-gapped environments
+
+Building a training environment for a machine without internet access is
+mostly about getting a long list of versions to agree - PyTorch and its CUDA
+build, Transformers, PEFT, TRL, bitsandbytes, DeepSpeed - and then proving the
+result works before it leaves the connected side. LayerSmith does that as a
+category of its own: **Create image → LLM Training & Fine-tuning**.
+
+- **Four profiles** — Hugging Face fine-tuning (LoRA, QLoRA, DPO; recommended),
+  advanced PyTorch training (full fine-tuning, continued pretraining, FSDP,
+  DeepSpeed, FlashAttention), LLaMA-Factory with its web UI, and CPU-only
+  dataset preparation.
+- **Start from the purpose** — training task, adaptation method and where it
+  runs; LayerSmith suggests a profile and explains every tool it includes.
+- **Locked, not latest** — base images pinned by digest, Python packages
+  installed from hash-locked files, one consistent resolution per stack.
+  Incompatible choices are refused before the build, with a working alternative.
+- **Checked offline** — after each build the image is tested with networking
+  disabled: locked versions and imports, a CPU training step on a tiny local
+  model, and the bundled examples (SFT, resume from checkpoint, DPO).
+  No GPU is needed to build or check.
+- **An export you can carry in** — the air-gap bundle adds a README with
+  Docker and Podman commands for that exact image, the locks, examples,
+  check results, and a list of what to bring separately (model weights, data).
+
+| Choose a purpose and profile | See what is included, and why |
+| --- | --- |
+| ![Training purpose](docs/screenshots/training-purpose.png) | ![Training software](docs/screenshots/training-software.png) |
+
+| Review versions and the Containerfile | Checks run inside the image |
+| --- | --- |
+| ![Training review](docs/screenshots/training-review.png) | ![Training build](docs/screenshots/training-build.png) |
+
+![Getting started](docs/screenshots/training-getting-started.png)
+
+Profiles, versions, measured image sizes and the offline workflow:
+[docs/training.md](docs/training.md).
+
 ## Two kinds of image
 
 The documentation keeps these apart, and so should you:

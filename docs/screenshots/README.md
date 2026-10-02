@@ -9,6 +9,11 @@ Used by the project README.
 | `build.png` | A build page with the live log |
 | `image-details.png` | A finished build: image identity, packages and downloads |
 | `security.png` | The Security panel on a build: severity counts, filters and findings |
+| `training-purpose.png` | LLM Training: purpose questions, recommendation and profile cards |
+| `training-software.png` | LLM Training: pinned base image and the tools included, with versions |
+| `training-review.png` | LLM Training: review step with versions and the generated Containerfile |
+| `training-build.png` | A training image build: the checks run inside the image |
+| `training-getting-started.png` | Getting started for the exact image: host directories and run commands |
 | `settings-security.png` | Settings -> Security: which scanner is in use and how old its data is |
 
 Guidelines:

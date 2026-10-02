@@ -97,6 +97,7 @@ p { margin: 0.4rem 0; }
 .grid { display: grid; gap: 1rem; }
 /* Grid items may shrink below their content, so wide code blocks scroll inside themselves. */
 .grid > * { min-width: 0; }
+.grid > .table { align-self: start; }
 .grid.stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .grid.cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }

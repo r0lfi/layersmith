@@ -147,7 +147,7 @@ export function GettingStarted({ sections, image }: { sections: GuideSection[]; 
       }
     >
       <p className="faint" style={{ marginTop: 0 }}>
-        Commands for <span className="mono">{image}</span>. Run them on the machine that will train.
+        Commands for <span className="mono">{image}</span>. Run them on the machine that will use the image.
       </p>
       {sections.map((section) => (
         <details key={section.id} className="guide" open={["dirs", "gpu", "shell", "examples"].includes(section.id)}>
