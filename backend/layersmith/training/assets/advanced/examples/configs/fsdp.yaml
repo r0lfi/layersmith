@@ -1,0 +1,21 @@
+# Accelerate: Fully Sharded Data Parallel (FSDP2), a PyTorch feature. Model
+# parameters, gradients and optimizer state are split across the GPUs of one
+# server, so a model that does not fit on one GPU can still be trained.
+#   accelerate launch --config_file /opt/layersmith/examples/configs/fsdp.yaml \
+#       --num_processes <number of GPUs> /opt/layersmith/examples/train_causal_lm.py ...
+# Checkpoints are written sharded (one file per GPU); resume with the same
+# number of GPUs. See https://huggingface.co/docs/accelerate/usage_guides/fsdp
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+num_machines: 1
+machine_rank: 0
+num_processes: 2
+mixed_precision: bf16
+fsdp_config:
+  fsdp_version: 2
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_cpu_ram_efficient_loading: true
+  fsdp_offload_params: false
+  fsdp_reshard_after_forward: true
+  fsdp_state_dict_type: SHARDED_STATE_DICT
+  fsdp_activation_checkpointing: false

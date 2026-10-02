@@ -1,0 +1,258 @@
+[
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Reverse the word 'violet'."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "teloiv"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Write 'copper' in upper case."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "COPPER"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Join 'falcon' and 'violet' with a dash."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "falcon-violet"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "How many letters are in 'garden'?"
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "'garden' has 6 letters."
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Reverse the word 'saffron'."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "norffas"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Write 'copper' in upper case."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "COPPER"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Join 'glacier' and 'falcon' with a dash."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "glacier-falcon"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "How many letters are in 'tundra'?"
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "'tundra' has 6 letters."
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Reverse the word 'lantern'."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "nretnal"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Write 'canvas' in upper case."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "CANVAS"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Join 'lantern' and 'garden' with a dash."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "lantern-garden"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "How many letters are in 'signal'?"
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "'signal' has 6 letters."
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Reverse the word 'compass'."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "ssapmoc"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Write 'thunder' in upper case."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "THUNDER"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "Join 'river' and 'compass' with a dash."
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "river-compass"
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ },
+ {
+  "conversations": [
+   {
+    "role": "user",
+    "content": "How many letters are in 'glacier'?"
+   }
+  ],
+  "chosen": {
+   "role": "assistant",
+   "content": "'glacier' has 7 letters."
+  },
+  "rejected": {
+   "role": "assistant",
+   "content": "I am not sure, maybe something else."
+  }
+ }
+]

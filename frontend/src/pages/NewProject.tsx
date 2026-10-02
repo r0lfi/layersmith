@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, Catalog, Spec } from "../api";
 import { Banner, Card, Field, useLoad } from "../components/ui";
+import TrainingWizard from "./TrainingWizard";
 
 const STEPS = ["Purpose", "Base", "Version", "Tools", "Packages", "Files", "Scripts", "Image", "Review"] as const;
 
@@ -60,7 +61,47 @@ function buildSpec(draft: Draft, catalog: Catalog): Spec {
   };
 }
 
+const CATEGORIES = [
+  { id: "general", name: "General purpose", description: "Shells, admin, network, development and cluster tools" },
+  { id: "llm-training", name: "LLM Training & Fine-tuning",
+    description: "Ready-to-run environments for fine-tuning and training language models" },
+];
+
 export default function NewProject() {
+  const [params, setParams] = useSearchParams();
+  const category = params.get("category") === "llm-training" ? "llm-training" : "general";
+  const setCategory = (id: string) =>
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("category", id);
+      return next;
+    });
+
+  return (
+    <>
+      <h1>Create image</h1>
+      <div className="grid cards category-row" style={{ marginTop: "1rem" }}>
+        {CATEGORIES.map((entry) => (
+          <button
+            key={entry.id}
+            className={`tile ${category === entry.id ? "selected" : ""}`}
+            onClick={() => setCategory(entry.id)}
+          >
+            <div className="tile-title">{entry.name}</div>
+            <div className="tile-sub">{entry.description}</div>
+          </button>
+        ))}
+      </div>
+      {category === "llm-training" ? (
+        <TrainingWizard onLeave={() => setCategory("general")} />
+      ) : (
+        <GeneralWizard />
+      )}
+    </>
+  );
+}
+
+function GeneralWizard() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { data: catalog, error: catalogError } = useLoad(() => api.catalog());
@@ -139,7 +180,6 @@ export default function NewProject() {
 
   return (
     <>
-      <h1>Create image</h1>
       <div className="steps" style={{ marginTop: "1rem" }}>
         {STEPS.map((label, index) => (
           <span

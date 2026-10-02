@@ -1,0 +1,15 @@
+# Core training stack. Versions follow the combination Axolotl 0.20.0 pins and tests
+# (transformers 5.17.0, peft 0.21.0, trl 1.13.0, accelerate 1.15.0, datasets 4.8.4).
+torch @ https://download-r2.pytorch.org/whl/cu128/torch-2.8.0%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=4354fc05bb79b208d6995a04ca1ceef6a9547b1c4334435574353d381c55087c
+transformers==5.17.0
+datasets==4.8.4
+accelerate==1.15.0
+peft==0.21.0
+trl==1.13.0
+bitsandbytes==0.50.2
+huggingface_hub==1.18.0
+tokenizers==0.23.1
+safetensors
+sentencepiece==0.2.2
+protobuf
+pyyaml

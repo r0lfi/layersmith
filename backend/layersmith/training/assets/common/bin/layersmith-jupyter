@@ -1,0 +1,22 @@
+#!/bin/sh
+# Start JupyterLab with token authentication, serving /workspace.
+#
+# The token comes from JUPYTER_TOKEN, or from the file in JUPYTER_TOKEN_FILE
+# (default /run/secrets/jupyter_token); without either, a random token is
+# generated and printed once. Publish the port on the host's localhost only:
+#   -p 127.0.0.1:8888:8888
+set -eu
+if [ -z "${JUPYTER_TOKEN:-}" ]; then
+    file="${JUPYTER_TOKEN_FILE:-/run/secrets/jupyter_token}"
+    if [ -r "$file" ]; then
+        JUPYTER_TOKEN="$(tr -d '\n' < "$file")"
+    else
+        JUPYTER_TOKEN="$(/opt/venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+        echo "No JUPYTER_TOKEN given; generated one for this run:"
+        echo "  token: $JUPYTER_TOKEN"
+        echo "  open:  http://127.0.0.1:${JUPYTER_PORT:-8888}/lab?token=$JUPYTER_TOKEN"
+    fi
+fi
+export JUPYTER_TOKEN
+exec jupyter lab --ip=0.0.0.0 --port="${JUPYTER_PORT:-8888}" --no-browser \
+    --ServerApp.root_dir=/workspace --ServerApp.allow_remote_access=True "$@"

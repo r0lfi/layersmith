@@ -44,7 +44,7 @@ The bundle also contains:
 
   metadata/manifest.json   what was built, from which base digest
   source/Containerfile     the exact file this image was built from
-
+{extra}
 No network access is required to load this image.
 """
 
@@ -75,7 +75,25 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def training_recipe(spec: dict | None) -> dict | None:
+    """The resolved recipe of a training build, or None for any other build."""
+    if not (spec or {}).get("training"):
+        return None
+    from layersmith.training import recipes
+
+    return recipes.resolve(spec["training"], spec.get("architecture"))
+
+
 def manifest_for(project: Project, build: Build, export_sha: str | None = None) -> dict:
+    recipe = training_recipe(build.spec)
+    training = None
+    if recipe:
+        training = {"profile": recipe["profile"], "profile_version": recipe["profile_version"],
+                    "stack": recipe["stack"], "addons": recipe["addons"], "target": recipe["target"],
+                    "python": recipe["python"], "torch": recipe["versions"].get("torch"), "cuda": recipe["cuda"],
+                    "lock_digest": recipe["lock_digest"], "base_tag": recipe["base"]["display"],
+                    "pinned_base_digest": recipe["base"]["digest"],
+                    "checks": {k: v.get("status") for k, v in ((build.checks or {}).get("results") or {}).items()}}
     return {
         "project": project.name,
         "repository": project.repository,
@@ -95,6 +113,7 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
         "export_sha256": export_sha,
         "layersmith_version": config.VERSION,
         "layersmith_revision": config.REVISION,
+        **({"training": training} if training else {}),
     }
 
 
@@ -244,6 +263,12 @@ class BuildService:
                         f"{self.settings.max_context_bytes // (1024 * 1024)} MiB"
                     )
                 shutil.copy2(blob, target, follow_symlinks=False)
+
+        recipe = training_recipe(build.spec)
+        if recipe:
+            from layersmith.training import docs, render
+
+            render.write_context(context, recipe, docs.markdown(recipe, build.image_ref or "IMAGE"))
         return context
 
     # --------------------------------------------------------------- run
@@ -274,7 +299,8 @@ class BuildService:
                                                    lambda line: self._emit(build_id, line))
                 build.base_digest = digest
                 if build.mode == "gui":
-                    text, packages, warnings = cf.generate(project_snapshot, build.spec, base_digest=digest)
+                    text, packages, warnings = cf.generate(project_snapshot, build.spec, base_digest=digest,
+                                                           image_ref=build.image_ref)
                     build.containerfile, build.packages = text, packages
                     for warning in warnings:
                         self._emit(build_id, f"WARNING: {warning}")
@@ -285,6 +311,9 @@ class BuildService:
                 self._set_status(build_id, "building")
                 info = self.backend.build(context, reference, build.architecture,
                                           lambda line: self._emit(build_id, line))
+
+                if training_recipe(build.spec):
+                    build.checks = self.run_checks(build_id, reference)
 
                 self._set_status(build_id, "exporting")
                 export = Path(self.settings.image_dir) / export_filename(project_snapshot["repository"],
@@ -316,7 +345,74 @@ class BuildService:
             if not self.settings.keep_build_contexts:
                 shutil.rmtree(self.context_dir(build_id), ignore_errors=True)
 
+    # --------------------------------------------------------- checks
+
+    def run_checks(self, build_id: str, reference: str) -> dict:
+        """Run the automatic checks of a training image; never fails the build.
+
+        A failed check is a result: the image exists and is exported either
+        way, and the dashboard shows exactly which check failed and why.
+        """
+        from layersmith.training import checks
+
+        results = {}
+        runner = getattr(self.backend, "run_container", None)
+        if runner is None:
+            self._emit(build_id, f"NOTE: the {self.backend.name} backend cannot run containers; checks not run")
+            return {"results": results}
+        self._set_status(build_id, "testing")
+        for check in checks.AUTOMATIC:
+            self._emit(build_id, f"--> Check: {check['id']} (inside the image, networking disabled)")
+            try:
+                code, output = runner(reference, check["argv"], lambda line: self._emit(build_id, line),
+                                      timeout=check["timeout"])
+            except Exception as exc:  # the runtime itself failed; record it like a failed check
+                code, output = 1, str(exc)
+            result = checks.parse_output(output)
+            if result is None:
+                result = {"check": check["id"], "status": "failed", "info": {},
+                          "steps": [{"name": "run", "status": "failed",
+                                     "detail": f"no result line (exit status {code}): {output[-300:]}"}]}
+            results[check["id"]] = result
+            self._emit(build_id, f"Check {check['id']}: {result['status'].upper()}")
+            with self.session_factory() as session:  # visible while the next check runs
+                row = session.get(Build, build_id)
+                row.checks = {"results": dict(results)}
+                session.commit()
+        return {"results": results}
+
     # -------------------------------------------------------- air-gap
+
+    def _training_bundle(self, build: Build, recipe: dict, staging: Path, archive: str, scanned: bool) -> None:
+        """training/: README with Getting started, recipe, locks, examples and check results."""
+        from layersmith.training import checks, docs, recipes, render
+
+        target = staging / "training"
+        target.mkdir()
+        rows = checks.summarise(build.status, recipe, build.checks, build.image_ref,
+                                recipes.is_customized(build.spec or {}))
+        contents = docs.export_contents(recipe, scanned=scanned)
+        (target / "README.md").write_text(
+            docs.markdown(recipe, build.image_ref, archive=archive, checks=rows, contents=contents),
+            encoding="utf-8")
+        (target / "recipe.json").write_text(json.dumps(render.recipe_file(recipe), indent=2) + "\n")
+        (target / "checks.json").write_text(json.dumps(
+            {"image": build.image_ref, "image_digest": build.image_digest, "checks": rows}, indent=2) + "\n")
+        for source in (False, True):
+            text = recipes.lock_text(recipe["stack"], recipe["addons"], source=source)
+            if text:
+                (target / ("requirements-source.lock" if source else "requirements.lock")).write_text(text)
+        if recipe["extra_python"]:
+            (target / "requirements-extra.txt").write_text("\n".join(recipe["extra_python"]) + "\n")
+        examples = target / "examples"
+        for group in render.ASSET_GROUPS[recipe["examples"]]:
+            source_dir = recipes.ASSET_DIR / group / "examples"
+            if source_dir.is_dir():
+                shutil.copytree(source_dir, examples, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        (target / "EXTERNAL-FILES.md").write_text(
+            "# Not in this package\n\n" + contents["summary"] + "\n\n"
+            + "".join(f"- {item}\n" for item in contents["external"]), encoding="utf-8")
 
     def airgap_bundle(self, build_id: str) -> Path:
         """Build a self-contained tar.gz that can be loaded without a network."""
@@ -344,7 +440,10 @@ class BuildService:
             load_command = self.backend.load_command(f"image/{export.name}")
             (staging / "INSTALL.txt").write_text(
                 INSTALL_TEXT.format(image_ref=build.image_ref, load_command=load_command,
-                                    archive_format=getattr(self.backend, "archive_format", "OCI archive")),
+                                    archive_format=getattr(self.backend, "archive_format", "OCI archive"),
+                                    extra=("  training/README.md       Getting started, examples, what to bring\n"
+                                           "                           separately (models, data), check results\n"
+                                           if training_recipe(build.spec) else "")),
                 encoding="utf-8")
 
             # What was known about this image when it was bundled. Absent
@@ -352,6 +451,12 @@ class BuildService:
             # than staying silent about it.
             if self.security_artifacts is not None:
                 self.security_artifacts(build, staging / "security")
+
+            recipe = training_recipe(build.spec)
+            if recipe:
+                security = staging / "security"
+                scanned = security.is_dir() and any(p.name != "NOT-SCANNED.txt" for p in security.iterdir())
+                self._training_bundle(build, recipe, staging, f"image/{export.name}", scanned)
 
             sums = []
             for path in sorted(staging.rglob("*")):

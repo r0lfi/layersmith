@@ -1,0 +1,21 @@
+# Accelerate: data parallel (DDP) over several GPUs in ONE server. Each GPU
+# holds a full copy of the model (or of the LoRA-wrapped model) and its own
+# share of every batch.
+#   accelerate launch --config_file /opt/layersmith/examples/configs/multi_gpu.yaml \
+#       --num_processes <number of GPUs> script.py ...
+# Start the container with all GPUs and enough shared memory (--ipc=host or
+# --shm-size=16g): NCCL and data loader workers use /dev/shm.
+#
+# Several servers additionally need num_machines, machine_rank,
+# main_process_ip/port, a network between the hosts that NCCL can use, and the
+# same image on every host. That is not covered by these examples.
+compute_environment: LOCAL_MACHINE
+distributed_type: MULTI_GPU
+num_machines: 1
+machine_rank: 0
+num_processes: 2
+gpu_ids: all
+mixed_precision: bf16
+rdzv_backend: static
+same_network: true
+main_training_function: main

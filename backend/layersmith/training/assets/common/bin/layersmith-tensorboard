@@ -1,0 +1,5 @@
+#!/bin/sh
+# Start TensorBoard on /logs. TensorBoard has no login: publish the port on
+# the host's localhost only (-p 127.0.0.1:6006:6006) and reach it through an
+# SSH tunnel from other machines.
+exec tensorboard --logdir "${TENSORBOARD_LOGDIR:-/logs}" --bind_all --port "${TENSORBOARD_PORT:-6006}" "$@"

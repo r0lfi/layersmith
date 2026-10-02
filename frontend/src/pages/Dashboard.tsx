@@ -45,6 +45,10 @@ export default function Dashboard() {
               <div className="tile-sub">Start from this template</div>
             </button>
           ))}
+          <button className="tile" onClick={() => navigate("/projects/new?category=llm-training")}>
+            <div className="tile-title">LLM Training &amp; Fine-tuning</div>
+            <div className="tile-sub">LoRA/QLoRA, full fine-tuning, LLaMA-Factory, data preparation</div>
+          </button>
           <button className="tile" onClick={() => navigate("/projects?import=1")}>
             <div className="tile-title">Import Dockerfile</div>
             <div className="tile-sub">Paste or upload an existing Dockerfile/Containerfile</div>

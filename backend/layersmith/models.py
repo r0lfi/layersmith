@@ -104,6 +104,11 @@ class Build(Base):
     airgap_sha256: Mapped[str | None] = mapped_column(String(64))
     airgap_size: Mapped[int | None] = mapped_column(BigInteger)
 
+    #: Training images only: results of the checks run in (or reported for)
+    #: this exact image, {"results": {check id: result}}. Never copied from
+    #: another build: results describe one image.
+    checks: Mapped[dict | None] = mapped_column(JSON)
+
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -259,3 +264,28 @@ def make_session_factory(engine):
 
 def create_all(engine) -> None:
     Base.metadata.create_all(engine)
+    add_missing_columns(engine)
+
+
+def add_missing_columns(engine) -> None:
+    """Add nullable columns introduced after a database was created.
+
+    create_all() makes missing tables but never alters existing ones. New
+    columns are always nullable, so an ALTER TABLE ... ADD COLUMN is enough
+    and old rows simply read as NULL. Anything more involved needs a real
+    migration.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            present = {column["name"] for column in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name not in present:
+                    if not column.nullable:
+                        raise RuntimeError(f"Cannot add non-nullable column {table.name}.{column.name} in place")
+                    kind = column.type.compile(dialect=engine.dialect)
+                    connection.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {kind}'))

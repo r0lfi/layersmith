@@ -1,0 +1,9 @@
+{
+  "@jupyterlab/apputils-extension:notification": {
+    "checkForUpdates": false,
+    "fetchNews": "false"
+  },
+  "@jupyterlab/extensionmanager-extension:plugin": {
+    "enabled": false
+  }
+}

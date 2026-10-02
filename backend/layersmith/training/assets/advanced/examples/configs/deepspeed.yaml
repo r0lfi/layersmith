@@ -1,0 +1,14 @@
+# Accelerate + DeepSpeed (needs the DeepSpeed add-on). Points at a DeepSpeed
+# JSON file; switch between ZeRO-2 and ZeRO-3 with CPU offload there.
+#   accelerate launch --config_file /opt/layersmith/examples/configs/deepspeed.yaml \
+#       --num_processes <number of GPUs> /opt/layersmith/examples/train_causal_lm.py ...
+# DeepSpeed compiles its CUDA ops (for example the fused Adam optimizer) with
+# nvcc the first time they are used, on the GPU machine. Check with `ds_report`.
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+num_machines: 1
+machine_rank: 0
+num_processes: 2
+deepspeed_config:
+  deepspeed_config_file: /opt/layersmith/examples/configs/deepspeed_zero3_offload.json
+  zero3_init_flag: true

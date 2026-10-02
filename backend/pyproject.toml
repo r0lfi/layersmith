@@ -21,6 +21,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["layersmith*"]
 
+# Lock files and the files copied into training images are data, not modules.
+[tool.setuptools.package-data]
+"layersmith.training" = ["stacks/*/*", "assets/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

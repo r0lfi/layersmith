@@ -57,12 +57,21 @@ def context_plan(spec):
     return plan
 
 
-def generate(project, spec, base_digest=None):
+def generate(project, spec, base_digest=None, image_ref=None):
     """Return (containerfile_text, packages, warnings) for a GUI-mode project."""
     family = spec["base"]["family"]
     base = spec["base"]["source"]
     repository = base.split("@", 1)[0].rsplit(":", 1)[0]
-    packages, warnings = resolve_packages(spec)
+    recipe = None
+    if spec.get("training"):
+        from layersmith.training import recipes, render
+
+        recipe = recipes.resolve(spec["training"], spec.get("architecture"))
+        # The profile's system packages first, then anything the user added.
+        packages, warnings = resolve_packages({**spec, "packages": [*recipe["system_packages"],
+                                                                    *(spec.get("packages") or [])]})
+    else:
+        packages, warnings = resolve_packages(spec)
     scripts = {k: v for k, v in (spec.get("scripts") or {}).items() if v and v.strip()}
     el = catalog.DISTROS.get(spec["base"].get("distribution"), {}).get("el", False)
 
@@ -81,6 +90,9 @@ def generate(project, spec, base_digest=None):
     }
     if base_digest:
         labels["org.opencontainers.image.base.digest"] = base_digest
+    if recipe:
+        labels["org.opencontainers.image.base.name"] = recipe["base"]["display"]
+        labels.update(render.labels(recipe))
     lines.append("LABEL " + " \\\n      ".join(f"{k}={_quote(v)}" for k, v in labels.items()))
 
     if scripts.get("pre_build"):
@@ -90,6 +102,8 @@ def generate(project, spec, base_digest=None):
     install = _install(family, packages, epel=bool(spec.get("enable_epel")) and el)
     if install:
         lines += ["", install]
+    if recipe:
+        lines += render.install_lines(recipe)
 
     for tool in spec.get("tools") or []:
         lines.append(f"COPY --chmod={tool['mode']} tools/{tool['sha256']} {tool['install_path']}")
@@ -118,6 +132,8 @@ def generate(project, spec, base_digest=None):
         lines += ["", f"WORKDIR {spec['workdir']}"]
     if user.get("name"):
         lines.append(f"USER {user['name']}")
+    if recipe:
+        lines += render.final_lines(recipe, image_ref)
 
     if scripts.get("entrypoint"):
         lines += ["", f"COPY --chmod=0755 scripts/entrypoint.sh {ENTRYPOINT_PATH}",

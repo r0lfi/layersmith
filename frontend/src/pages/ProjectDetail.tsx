@@ -81,6 +81,15 @@ export default function ProjectDetail() {
           <table className="table">
             <tbody>
               <tr><td data-label="Template">Template</td><td>{project.template}</td></tr>
+              {project.training && (
+                <>
+                  <tr><td data-label="Stack">Stack</td><td>{project.training.stack_name}</td></tr>
+                  <tr>
+                    <td data-label="Add-ons">Add-ons</td>
+                    <td>{project.training.addons.join(", ") || "none"}</td>
+                  </tr>
+                </>
+              )}
               <tr><td data-label="Mode">Mode</td><td>{project.mode === "gui" ? "GUI managed" : "Advanced"}</td></tr>
               <tr><td data-label="Base">Base</td><td className="mono">{project.base_image ?? "-"}</td></tr>
               <tr>

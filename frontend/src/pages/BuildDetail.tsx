@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, buildLogSocket, formatBytes, formatDuration, formatWhen } from "../api";
 import { Banner, Card, StatusPill, isActive, useLoad } from "../components/ui";
 import { SecurityPanel } from "../components/Security";
+import { TrainingPanel } from "../components/Training";
 
 function LogLine({ line }: { line: string }) {
   const className = /^STEP |^--> /.test(line)
@@ -19,7 +20,7 @@ function LogLine({ line }: { line: string }) {
 
 export default function BuildDetail() {
   const { id = "" } = useParams();
-  const { data: build, error, reload } = useLoad(() => api.build(id), [id]);
+  const { data: build, error, reload, setData } = useLoad(() => api.build(id), [id]);
   const { data: settings } = useLoad(() => api.settings(), []);
   const [lines, setLines] = useState<string[]>([]);
   const [live, setLive] = useState(false);
@@ -157,6 +158,15 @@ export default function BuildDetail() {
           <pre className="code">{build.containerfile || "-"}</pre>
         </Card>
       </div>
+
+      {build.training && (
+        <TrainingPanel
+          buildId={build.id}
+          detail={build.training}
+          ready={build.status === "ready"}
+          onChange={(training) => setData({ ...build, training })}
+        />
+      )}
 
       {build.status === "ready" && (
         <SecurityPanel

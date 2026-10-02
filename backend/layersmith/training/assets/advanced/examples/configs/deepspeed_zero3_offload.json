@@ -1,0 +1,17 @@
+{
+  "_comment": "ZeRO-3 with CPU offload: parameters, gradients and optimizer state partitioned, optimizer and parameters offloaded to CPU RAM. Slower, much less GPU memory; needs plenty of host RAM.",
+  "bf16": {"enabled": "auto"},
+  "fp16": {"enabled": "auto"},
+  "zero_optimization": {
+    "stage": 3,
+    "offload_optimizer": {"device": "cpu", "pin_memory": true},
+    "offload_param": {"device": "cpu", "pin_memory": true},
+    "overlap_comm": true,
+    "contiguous_gradients": true,
+    "stage3_gather_16bit_weights_on_model_save": true
+  },
+  "gradient_accumulation_steps": "auto",
+  "gradient_clipping": "auto",
+  "train_batch_size": "auto",
+  "train_micro_batch_size_per_gpu": "auto"
+}

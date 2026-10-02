@@ -37,6 +37,151 @@ export interface Build {
   containerfile?: string;
   log?: string;
   manifest?: Record<string, unknown>;
+  training_profile?: string | null;
+  training?: TrainingDetail | null;
+}
+
+/* ------------------------------------------------- LLM training profiles */
+
+export interface TrainingRequest {
+  profile?: string;
+  target?: string;
+  stack?: string;
+  addons?: string[];
+  intent?: Record<string, string>;
+  extra_python?: string[];
+}
+
+export interface TrainingTool {
+  id: string;
+  name: string;
+  package: string;
+  what: string;
+  used_for: string;
+  when: string;
+  pulls_in: string;
+  limitations: string;
+  docs: string;
+  version?: string | null;
+  required: boolean;
+  why: string;
+  addon?: string | null;
+}
+
+export interface TrainingRecipe {
+  profile: string;
+  profile_name: string;
+  profile_version: string;
+  target: string;
+  target_name: string;
+  gpu: boolean;
+  architecture: string;
+  stack: string;
+  stack_name: string;
+  stack_summary: string;
+  addons: string[];
+  intent: Record<string, string>;
+  base: { image: string; tag: string; digest: string; reference: string; display: string; reason: string };
+  python: string;
+  torch: string | null;
+  cuda: string | null;
+  driver: string | null;
+  gpu_support: string | null;
+  host_requirements: string[];
+  versions: Record<string, string>;
+  lock_digest: string;
+  compiled: string[];
+  tools: TrainingTool[];
+  system_packages: string[];
+  system_why: string;
+  extra_python: string[];
+  ports: { port: number; name: string }[];
+  notes: string[];
+}
+
+export interface TrainingProfile {
+  id: string;
+  name: string;
+  recommended: boolean;
+  summary: string;
+  description: string;
+  best_for: string[];
+  targets: string[];
+  stacks: string[];
+  addons: string[];
+  default_addons: string[];
+  intent: Record<string, string>;
+  fits: Record<string, string[]>;
+}
+
+export interface TrainingCatalog {
+  category: { id: string; name: string; intro: string; before_build: string };
+  concepts: { id: string; term: string; text: string }[];
+  intents: Record<string, { label: string; hint: string; options: { id: string; label: string }[] }>;
+  targets: Record<string, { name: string; architecture: string; gpu: boolean; summary: string; host_requirements: string[] }>;
+  stacks: Record<string, { name: string; summary: string; target: string; python: string; torch: string | null;
+    cuda: string | null; driver: string | null; gpu_support: string | null; versions: Record<string, string> }>;
+  addons: Record<string, { name: string; tools: string[]; summary: string; stacks?: string[]; needs_devel_base?: boolean }>;
+  tools: Record<string, Omit<TrainingTool, "id" | "version" | "required" | "why" | "addon">>;
+  profiles: TrainingProfile[];
+  directories: { path: string; host: string; mode: string; purpose: string }[];
+}
+
+export interface ExportContents {
+  summary: string;
+  included: string[];
+  external: string[];
+}
+
+export interface GuideStep {
+  title: string;
+  text?: string;
+  code?: string;
+  docker?: string;
+  podman?: string;
+}
+
+export interface GuideSection extends GuideStep {
+  id: string;
+  note?: string;
+  link?: string;
+  steps?: GuideStep[];
+  table?: { path: string; host: string; mode: string; purpose: string }[];
+}
+
+export interface TrainingResolve {
+  ok: boolean;
+  error?: string;
+  alternative?: TrainingRequest & { architecture?: string } | null;
+  label?: string | null;
+  recipe?: TrainingRecipe;
+  recommendation?: { profile: string; reason: string };
+  export_contents?: ExportContents;
+  before_build?: string;
+}
+
+export type CheckStatus = "passed" | "failed" | "not_run";
+
+export interface CheckRow {
+  id: "image" | "deps" | "cpu" | "gpu" | "offline";
+  status: CheckStatus;
+  label: string;
+  meaning: string;
+  summary: string;
+  steps?: { name: string; status: string; detail: string; seconds?: number }[];
+  info?: Record<string, unknown>;
+  finished?: string | null;
+  command?: { docker: string; podman: string } | null;
+  applies_to: string;
+}
+
+export interface TrainingDetail {
+  recipe: TrainingRecipe;
+  customized: boolean;
+  checks: CheckRow[];
+  getting_started: { image: string; sections: GuideSection[] };
+  export_contents: ExportContents;
+  before_build: string;
 }
 
 export type ScanState = "queued" | "exporting" | "scanning" | "completed" | "failed";
@@ -108,6 +253,7 @@ export interface Project {
   builds?: Build[];
   packages?: string[];
   warnings?: string[];
+  training?: TrainingRecipe | null;
 }
 
 export interface Spec {
@@ -123,6 +269,7 @@ export interface Spec {
   enable_epel?: boolean;
   workdir?: string;
   tag_latest?: boolean;
+  training?: TrainingRequest;
 }
 
 export interface Catalog {
@@ -250,6 +397,12 @@ export const api = {
     return request<Scan>(`/scans/${scanId}${suffix ? `?${suffix}` : ""}`);
   },
   sbomUrl: (scanId: string) => `/api/scans/${scanId}/sbom`,
+
+  trainingCatalog: () => request<TrainingCatalog>("/training/catalog"),
+  trainingResolve: (training: TrainingRequest, architecture?: string) =>
+    request<TrainingResolve>("/training/resolve", { method: "POST", body: JSON.stringify({ training, architecture }) }),
+  gpuReport: (buildId: string, report: string) =>
+    request<TrainingDetail>(`/builds/${buildId}/gpu-report`, { method: "POST", body: JSON.stringify({ report }) }),
 
   upload: async (file: File) => {
     const form = new FormData();

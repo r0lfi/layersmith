@@ -50,3 +50,7 @@ class BuildBackend(Protocol):
 
     def remove(self, image_ref: str) -> None:
         """Delete a built image from local storage."""
+
+    # Optional. Backends that can run a built image implement it; training
+    # image checks are skipped (and reported as not run) on those that cannot.
+    # def run_container(self, image_ref, argv, on_log, timeout=1800, network="none") -> tuple[int, str]

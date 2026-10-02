@@ -1,0 +1,3 @@
+#!/bin/sh
+# Verify this training image: layersmith-check {deps|cpu|offline|gpu|model DIR|all} [--json]
+exec /opt/venv/bin/python /opt/layersmith/checks/run.py "$@"

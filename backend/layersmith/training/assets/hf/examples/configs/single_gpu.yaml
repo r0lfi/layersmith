@@ -1,0 +1,8 @@
+# Accelerate: one GPU. Usually not needed - plain `python script.py` does the same.
+#   accelerate launch --config_file /opt/layersmith/examples/configs/single_gpu.yaml script.py ...
+compute_environment: LOCAL_MACHINE
+distributed_type: 'NO'
+num_machines: 1
+num_processes: 1
+gpu_ids: '0'
+mixed_precision: bf16   # use fp16 on GPUs without bf16 (before Ampere)

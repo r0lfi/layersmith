@@ -39,6 +39,11 @@ from layersmith import scanners
 from layersmith.services import storage
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 from layersmith.services.scanning import ScanError, ScanService, finding_row, summarise, sweep_temporary_exports
+from layersmith.services.builds import training_recipe
+from layersmith.training import catalog as training_catalog
+from layersmith.training import checks as training_checks
+from layersmith.training import docs as training_docs
+from layersmith.training import recipes as training_recipes
 
 router = APIRouter(prefix="/api")
 
@@ -82,6 +87,16 @@ class StorageIn(BaseModel):
     paths: dict[str, str]
 
 
+class TrainingResolveIn(BaseModel):
+    training: dict = Field(default_factory=dict)
+    architecture: str | None = None
+
+
+class GpuReportIn(BaseModel):
+    #: The JSON `layersmith-check gpu --json` printed, or its whole output.
+    report: dict | str
+
+
 # ------------------------------------------------------------- helpers
 
 def get_state(request: Request) -> dict:
@@ -121,6 +136,24 @@ def _build_json(build: Build, project: Project | None = None) -> dict:
         "airgap_size": build.airgap_size, "airgap_sha256": build.airgap_sha256,
         "started_at": build.started_at, "finished_at": build.finished_at, "created_at": build.created_at,
         "duration_seconds": build.duration_seconds,
+        "training_profile": ((build.spec or {}).get("training") or {}).get("profile"),
+    }
+
+
+def _training_detail(build: Build, scanned: bool = False) -> dict | None:
+    """Recipe, check statuses, Getting started and export contents of a training build."""
+    recipe = training_recipe(build.spec)
+    if recipe is None:
+        return None
+    customized = training_recipes.is_customized(build.spec or {})
+    image = build.image_ref or "IMAGE"
+    archive = Path(build.export_path).name if build.export_path else None
+    return {
+        "recipe": recipe, "customized": customized,
+        "checks": training_checks.summarise(build.status, recipe, build.checks, build.image_ref, customized),
+        "getting_started": training_docs.getting_started(recipe, image, archive),
+        "export_contents": training_docs.export_contents(recipe, scanned=scanned),
+        "before_build": training_docs.before_build(recipe),
     }
 
 
@@ -374,11 +407,20 @@ def get_project(project_id: str, state=Depends(get_state)):
             select(Build).where(Build.project_id == project_id).order_by(Build.number.desc())).all()
         data = _project_json(project, builds)
         if project.mode == "gui" and project.spec:
-            text, packages, warnings = cf.generate({"name": project.name, "description": project.description},
-                                                   project.spec, base_digest=project.base_digest)
+            try:
+                text, packages, warnings = cf.generate({"name": project.name, "description": project.description},
+                                                       project.spec, base_digest=project.base_digest)
+            except InvalidSpec as exc:  # a saved recipe this version no longer offers
+                text, packages, warnings = "", [], [str(exc)]
             data["containerfile"] = text
             data["packages"] = packages
             data["warnings"] = warnings
+            if project.spec.get("training"):
+                try:
+                    data["training"] = training_recipes.resolve(project.spec["training"],
+                                                                project.spec.get("architecture"))
+                except InvalidSpec:
+                    data["training"] = None
         return data
 
 
@@ -449,7 +491,7 @@ def start_build(project_id: str, payload: BuildIn, state=Depends(get_state)):
         if session.scalar(select(func.count()).select_from(Build)
                           .where(Build.project_id == project_id, Build.status.in_(("queued", "preparing",
                                                                                    "pulling", "building",
-                                                                                   "exporting")))):
+                                                                                   "testing", "exporting")))):
             raise HTTPException(409, "A build for this project is already running")
 
         build = Build(project_id=project.id, number=next_build_number(session), version=version,
@@ -498,7 +540,63 @@ def get_build(build_id: str, state=Depends(get_state)):
             # this endpoint is polled. The live stream carries the rest.
             log = log_file.read_text(encoding="utf-8")[-LOG_REPLY_CHARS:] if log_file.is_file() else ""
         return {**_build_json(build, project), "containerfile": build.containerfile, "log": log,
-                "manifest": manifest_for(project, build, build.export_sha256)}
+                "manifest": manifest_for(project, build, build.export_sha256),
+                "training": _training_detail(build, scanned=_has_completed_scan(session, build.id))}
+
+
+def _has_completed_scan(session, build_id: str) -> bool:
+    return session.scalar(select(func.count()).select_from(Scan)
+                          .where(Scan.build_id == build_id, Scan.state == "completed")) > 0
+
+
+@router.post("/builds/{build_id}/gpu-report")
+def record_gpu_report(build_id: str, payload: GpuReportIn, state=Depends(get_state)):
+    """Record the GPU check a user ran on the target machine, for this image only."""
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        if not (build.spec or {}).get("training") or build.status != "ready":
+            raise HTTPException(409, "GPU results can be recorded for finished training images only")
+        try:
+            result = training_checks.validate_gpu_report(payload.report, build.image_ref)
+        except training_checks.InvalidReport as exc:
+            raise HTTPException(422, str(exc))
+        recorded = dict(build.checks or {})
+        recorded["results"] = {**(recorded.get("results") or {}), "gpu": result}
+        build.checks = recorded
+        session.commit()
+        return _training_detail(build, scanned=_has_completed_scan(session, build.id))
+
+
+@router.get("/training/catalog")
+def training_catalog_view():
+    """The LLM Training & Fine-tuning category: profiles, tools, concepts, targets."""
+    return {
+        "category": training_catalog.CATEGORY,
+        "concepts": training_catalog.CONCEPTS,
+        "intents": training_catalog.INTENTS,
+        "targets": training_catalog.TARGETS,
+        "stacks": {key: {**value, "versions": training_recipes.locked_versions(key, [])}
+                   for key, value in training_catalog.STACKS.items()},
+        "addons": training_catalog.ADDONS,
+        "tools": training_catalog.TOOLS,
+        "profiles": training_catalog.PROFILES,
+        "directories": training_docs.DIRECTORIES,
+    }
+
+
+@router.post("/training/resolve")
+def training_resolve(payload: TrainingResolveIn):
+    """Validate a training request. A conflict is an answer here, not an error."""
+    try:
+        recipe = training_recipes.resolve(payload.training, payload.architecture)
+    except training_recipes.TrainingConflict as exc:
+        return {"ok": False, "error": str(exc), "alternative": exc.alternative, "label": exc.label}
+    return {"ok": True, "recipe": recipe, "recommendation": training_recipes.recommend(payload.training.get("intent")),
+            "export_contents": training_docs.export_contents(recipe, scanned=None),
+            "before_build": training_docs.before_build(recipe),
+            "getting_started": training_docs.getting_started(recipe, "IMAGE")}
 
 
 @router.post("/builds/{build_id}/airgap", status_code=201)
@@ -563,7 +661,7 @@ def preview(payload: ProjectIn):
                                                spec)
     except InvalidSpec as exc:
         raise HTTPException(422, str(exc))
-    return {"containerfile": text, "packages": packages, "warnings": warnings}
+    return {"containerfile": text, "packages": packages, "warnings": warnings, "spec": spec}
 
 
 def create_app(settings=None) -> FastAPI:

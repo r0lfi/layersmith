@@ -115,6 +115,9 @@ def validate_spec(spec):
     """Normalise and validate a wizard specification. Raises InvalidSpec."""
     spec = json.loads(json.dumps(spec or {}))  # reject non-JSON values early
 
+    if spec.get("training"):
+        _apply_training(spec)
+
     base = spec.get("base") or {}
     distribution = base.get("distribution")
     if distribution and distribution in catalog.DISTROS:
@@ -205,6 +208,32 @@ def validate_spec(spec):
     spec["tag_latest"] = bool(spec.get("tag_latest"))
     spec["enable_epel"] = bool(spec.get("enable_epel"))
     return spec
+
+
+def _apply_training(spec):
+    """A training profile decides the base image, architecture, user and layout.
+
+    The request is resolved (and every conflict reported) by the training
+    module; what is stored is the small request, never the expanded recipe,
+    so a saved project follows the recipe of the LayerSmith version that
+    builds it.
+    """
+    from layersmith.training import recipes  # imported here: recipes imports this module
+
+    request = spec["training"]
+    if not isinstance(request, dict):
+        raise InvalidSpec("training must be an object")
+    for key in ("user", "workdir"):
+        if spec.get(key):
+            raise InvalidSpec(f"Training images always run as user 'trainer' (uid 1000) in /workspace; "
+                              f"remove the custom {key}.")
+    recipe = recipes.resolve(request, spec.get("architecture"))
+    spec["training"] = {
+        "profile": recipe["profile"], "target": recipe["target"], "stack": recipe["stack"],
+        "addons": recipe["addons"], "intent": recipe["intent"], "extra_python": recipe["extra_python"],
+    }
+    spec["architecture"] = recipe["architecture"]
+    spec["base"] = {"source": recipe["base"]["reference"], "family": "deb", "display": recipe["base"]["display"]}
 
 
 def resolve_packages(spec):

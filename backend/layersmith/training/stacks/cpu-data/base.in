@@ -1,0 +1,12 @@
+# Dataset preparation without PyTorch: the same datasets/tokenizers/transformers
+# versions as the GPU stacks, so data prepared here loads the same way there.
+datasets==4.8.4
+transformers==5.17.0
+tokenizers==0.23.1
+huggingface_hub==1.18.0
+sentencepiece==0.2.2
+pandas
+numpy
+pyarrow
+pyyaml
+jinja2

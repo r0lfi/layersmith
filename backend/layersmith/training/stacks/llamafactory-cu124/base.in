@@ -1,0 +1,12 @@
+# LLaMA-Factory 0.9.5 with the PyTorch build its documentation recommends (2.6.0, CUDA 12.4).
+# Every other version is resolved inside the bounds llamafactory 0.9.5 itself declares.
+torch @ https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp312-cp312-linux_x86_64.whl#sha256=a393b506844035c0dac2f30ea8478c343b8e95a429f06f3b3cadfc7f53adb597
+torchvision @ https://download-r2.pytorch.org/whl/cu124/torchvision-0.21.0%2Bcu124-cp312-cp312-linux_x86_64.whl#sha256=efb53ea0af7bf09b7b53e2a18b9be6d245f7d46a90b51d5cf97f37e9b929a991
+torchaudio @ https://download-r2.pytorch.org/whl/cu124/torchaudio-2.6.0%2Bcu124-cp312-cp312-linux_x86_64.whl#sha256=3e5ffa69606171c74f3e2b969785ead50b782ca657e746aaee1ee7cc88dcfc08
+llamafactory==0.9.5
+# requirements/metrics.txt from the v0.9.5 tag (the official install adds it)
+nltk
+jieba
+rouge-chinese
+# requirements/bitsandbytes.txt, for QLoRA in LLaMA Board
+bitsandbytes==0.50.2

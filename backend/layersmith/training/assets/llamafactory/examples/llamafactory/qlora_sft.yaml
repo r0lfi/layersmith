@@ -1,0 +1,48 @@
+# LLaMA-Factory: supervised fine-tuning with QLoRA (4-bit base model, NVIDIA GPU).
+#   llamafactory-cli train /opt/layersmith/examples/llamafactory/qlora_sft.yaml
+# Any key can be overridden on the command line, e.g.
+#   llamafactory-cli train qlora_sft.yaml model_name_or_path=/models/my-model template=llama3
+# Copy this file to /workspace and edit it for real runs.
+
+### model - a local directory under /models, or a Hub id (needs network or a filled cache)
+model_name_or_path: /models/your-model
+trust_remote_code: false
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+quantization_bit: 4          # QLoRA: base model loaded in 4-bit with bitsandbytes
+quantization_method: bnb
+lora_rank: 8
+lora_target: all
+
+### dataset - dataset_dir holds dataset_info.json, which names the files and their columns
+dataset_dir: /opt/layersmith/examples/llamafactory
+dataset: layersmith_sample   # synthetic, function test only - replace with your own entry
+template: chatml             # must match the model: llama3, qwen3_nothink, mistral, gemma, ...
+cutoff_len: 2048
+preprocessing_num_workers: 4
+
+### output - /outputs is a host directory, so results survive the container
+output_dir: /outputs/llamafactory/qlora-sft
+logging_steps: 10
+save_steps: 200
+plot_loss: true
+report_to: none   # tensorboard (writes to the output directory) when the TensorBoard add-on is installed
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true            # false on GPUs before Ampere
+resume_from_checkpoint: null   # or /outputs/llamafactory/qlora-sft/checkpoint-200
+
+### eval - validation data stays separate from training
+# eval_dataset: my_validation_set
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 200

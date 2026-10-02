@@ -19,6 +19,8 @@ backend/static/
 
 # Local runtime data: never commit anything LayerSmith writes at runtime
 data/
+# ...except the sample datasets shipped inside training images
+!backend/layersmith/training/assets/**/data/
 builds/
 images/
 exports/

@@ -15,6 +15,7 @@ Commands are argv lists; no user value is ever interpreted by a shell.
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 from layersmith.backends.base import BuildError, ImageInfo, LogSink
@@ -136,6 +137,38 @@ class CliBackend:
         if not destination.is_file() or destination.stat().st_size == 0:
             raise BuildError("Export produced no archive")
         return destination.stat().st_size
+
+    def run_container(self, image_ref: str, argv: list[str], on_log: LogSink, timeout: int = 1800,
+                      network: str = "none") -> tuple[int, str]:
+        """Run a command in a built image and return (exit status, output).
+
+        Used for the checks of training images: networking off by default,
+        every capability dropped, no privilege escalation, removed afterwards.
+        A failing command is a result to record, not an error, so the exit
+        status is returned instead of raised.
+        """
+        args = ["run", "--rm", "--network", network, "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges", "--shm-size", "1g", image_ref, *argv]
+        on_log("$ " + " ".join([self.binary, *args]))
+        collected: list[str] = []
+        with subprocess.Popen([self.binary, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              bufsize=1) as process:
+            # A watchdog, because reading output blocks: a hung check that
+            # prints nothing would otherwise never reach the wait() below.
+            watchdog = threading.Timer(timeout, process.kill)
+            watchdog.start()
+            try:
+                for line in process.stdout:
+                    line = line.rstrip("\n")
+                    collected.append(line)
+                    on_log(line)
+                code = process.wait()
+            finally:
+                timed_out = not watchdog.is_alive()
+                watchdog.cancel()
+        if timed_out:
+            return 124, "\n".join(collected + [f"Timed out after {timeout // 60} minutes"])
+        return code, "\n".join(collected)
 
     def remove(self, image_ref: str) -> None:
         try:

@@ -1,0 +1,33 @@
+# LLaMA-Factory: preference tuning (DPO) with LoRA, usually after SFT.
+#   llamafactory-cli train /opt/layersmith/examples/llamafactory/lora_dpo.yaml
+# The dataset needs a prompt plus a chosen and a rejected answer ("ranking": true in dataset_info.json).
+
+model_name_or_path: /models/your-model
+trust_remote_code: false
+
+stage: dpo
+do_train: true
+finetuning_type: lora
+lora_rank: 8
+lora_target: all
+pref_beta: 0.1
+pref_loss: sigmoid
+
+dataset_dir: /opt/layersmith/examples/llamafactory
+dataset: layersmith_preference   # synthetic, function test only
+template: chatml
+cutoff_len: 2048
+
+output_dir: /outputs/llamafactory/lora-dpo
+logging_steps: 10
+save_steps: 200
+plot_loss: true
+report_to: none
+
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-6
+num_train_epochs: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
