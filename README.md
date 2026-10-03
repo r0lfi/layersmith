@@ -152,6 +152,24 @@ result works before it leaves the connected side. Choose
 Profiles, versions, measured image sizes and the offline workflow:
 [docs/training.md](docs/training.md).
 
+## Terminal client
+
+LayerSmith can also be used from a terminal on another machine - a
+jumphost, a laptop, an admin server - through the same API as the web UI:
+
+```bash
+layersmith config set server https://layersmith.example.org
+layersmith                          # interactive terminal interface
+layersmith build my-image --follow  # or the command line, for scripts
+layersmith export 12 --output ./image.tar
+```
+
+The client is a separate, pure-Python package (`client/`, Python 3.9+) with
+an offline installation archive. It needs no container runtime and no
+access to the container host; builds keep running on the server when the
+client disconnects. See [docs/client.md](docs/client.md) and the
+[feature matrix](docs/client-features.md).
+
 ## Two kinds of image
 
 The documentation keeps these apart, and so should you:
@@ -251,6 +269,8 @@ Back up the volume the ordinary way; `/data` is all there is.
 
 - **Backend** — FastAPI, SQLite by default, one build worker thread.
 - **Frontend** — React and Vite, served by the backend on the same port.
+- **Terminal client** — `client/`, a separate package with a CLI and a
+  Textual TUI. It uses only the HTTP API, like the web UI.
 - **Build backends** — a small interface (`available`, `resolve_base`,
   `build`, `inspect`, `export`, `remove`) with Podman and Docker
   implementations, so a remote build agent can be added without touching the

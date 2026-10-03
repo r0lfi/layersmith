@@ -1,0 +1,278 @@
+/* LayerSmith TUI stylesheet.
+ *
+ * Colours come only from the theme (tui/theme.py): Textual's variables
+ * ($background, $surface = panels, $panel = raised, $primary = blue,
+ * $success ...) and the ls-* variables ($ls-border, $ls-muted, $ls-selected,
+ * $ls-hover, $ls-raised, $ls-cyan). No literal colours here.
+ *
+ * Layout modes are classes on the app: .wide (>= 140x40), .medium and
+ * .compact (< 100 columns or < 28 rows); .tall from 44 rows.
+ */
+
+Screen { background: $background; color: $foreground; }
+VerticalScroll, ScrollableContainer { scrollbar-size-vertical: 1; }
+
+/* ================================================================ header */
+
+AppHeader {
+    dock: top;
+    height: 5;
+    padding: 0 2;
+    background: $background;
+    border-bottom: solid $ls-border;
+}
+LayerSmithApp.wide AppHeader { height: 6; }
+.logo { width: 12; height: 4; }
+#logo-large { height: 5; display: none; }
+LayerSmithApp.wide #logo-large { display: block; }
+LayerSmithApp.wide #logo-medium { display: none; }
+#brand { width: 1fr; height: 4; padding: 1 0 0 2; }
+#brand-name { height: 1; }
+#brand-tagline { height: 1; color: $ls-muted; }
+#brand-by { height: 1; color: $ls-muted 60%; }
+#connection-state { width: auto; min-width: 30; height: 4; padding-top: 1; text-align: right; }
+
+LayerSmithApp.compact AppHeader { height: 3; padding: 0 1; }
+LayerSmithApp.compact .logo, LayerSmithApp.compact #brand-by { display: none; }
+LayerSmithApp.compact #brand { height: 2; padding: 0; }
+LayerSmithApp.compact #connection-state { height: 2; padding-top: 0; }
+
+/* ================================================================ body */
+
+#body { height: 1fr; padding: 1 2 0 1; }
+LayerSmithApp.compact #body { padding: 0; }
+
+#sidebar {
+    width: 26;
+    height: 1fr;
+    margin-right: 2;
+    border: round $ls-border;
+    background: $surface;
+    padding: 1 1 0 1;
+}
+LayerSmithApp.compact #sidebar { width: 21; margin-right: 0; padding: 0; }
+#sidebar:focus-within { border: round $primary; }
+
+#nav { height: 1fr; border: none; background: $surface; padding: 0; scrollbar-size-vertical: 0; }
+#nav:focus { border: none; background-tint: transparent; }
+#nav > .option-list--option-highlighted { background: transparent; text-style: none; }
+#nav:focus > .option-list--option-highlighted { background: $ls-hover; text-style: none; }
+#nav > .option-list--option-hover { background: $ls-hover; }
+#nav > .option-list--separator { color: $ls-border; }
+#sidebar-foot { height: 1; color: $ls-muted; padding-left: 1; }
+LayerSmithApp.compact #sidebar-foot { display: none; }
+
+#content { width: 1fr; height: 1fr; }
+.view { height: 1fr; }
+
+/* ================================================================ panels */
+
+.panel {
+    border: round $ls-border;
+    border-title-color: $primary;
+    border-title-style: bold;
+    border-subtitle-color: $ls-muted;
+    background: $surface;
+    padding: 0 1;
+}
+.panel:focus-within { border: round $primary; }
+LayerSmithApp.compact .panel { padding: 0; }
+
+/* list | details over a log: the arrangement the list pages share */
+.workspace {
+    layout: grid;
+    grid-size: 2 2;
+    grid-columns: 1fr 40;
+    grid-rows: 1fr 12;
+    grid-gutter: 1 2;
+    height: 1fr;
+}
+LayerSmithApp.tall .workspace { grid-rows: 1fr 14; }
+.workspace > .log-panel { column-span: 2; }
+.pane-hint { display: none; color: $ls-muted; height: 1; }
+
+/* medium and compact: the list on top, details or log underneath */
+LayerSmithApp.medium .workspace, LayerSmithApp.compact .workspace {
+    grid-size: 1 2;
+    grid-columns: 1fr;
+    grid-rows: 1fr 13;
+}
+LayerSmithApp.compact .workspace { grid-rows: 1fr 1fr; grid-gutter: 0; }
+LayerSmithApp.medium .workspace.show-log > .detail-panel,
+LayerSmithApp.compact .workspace.show-log > .detail-panel,
+LayerSmithApp.medium .workspace.show-details > .log-panel,
+LayerSmithApp.compact .workspace.show-details > .log-panel { display: none; }
+LayerSmithApp.medium .pane-hint, LayerSmithApp.compact .pane-hint { display: block; }
+
+.log-panel { background: $background; padding: 0 1; }
+.log-panel RichLog { background: $background; height: 1fr; scrollbar-size-vertical: 1; }
+
+.detail-body { height: 1fr; }
+.actions { height: auto; margin-top: 1; }
+.actions Button { margin-right: 1; }
+
+.empty { color: $ls-muted; padding: 1 1; }
+.hint, .hint-bar { color: $ls-muted; }
+.hint-bar { height: auto; padding: 0 1; }
+.section-title { color: $ls-cyan; text-style: bold; margin-top: 1; }
+.code { color: $foreground; background: $background; padding: 0 1; }
+.compact-panel { height: auto; margin-bottom: 1; }
+
+/* ================================================================ dashboard */
+
+.stats { height: 4; margin-bottom: 1; }
+.stat {
+    width: 1fr;
+    height: 4;
+    border: round $ls-border;
+    background: $surface;
+    padding: 0 2;
+    margin-right: 2;
+}
+.stat.last { margin-right: 0; }
+LayerSmithApp.compact .stats { margin-bottom: 0; }
+LayerSmithApp.compact .stat { margin-right: 0; padding: 0 1; }
+
+.dashboard-row { height: auto; margin-bottom: 1; }
+.dashboard-row .panel { height: auto; }
+#recent-panel { width: 1fr; margin-right: 2; }
+#recent { height: auto; max-height: 12; }
+.side-column { width: 40; height: auto; }
+.side-column > .panel { height: auto; margin-bottom: 1; }
+LayerSmithApp.medium .side-column, LayerSmithApp.compact .side-column { display: none; }
+LayerSmithApp.medium #recent-panel, LayerSmithApp.compact #recent-panel { margin-right: 0; }
+LayerSmithApp.compact .dashboard-row { margin-bottom: 0; }
+#dashboard-log { height: 1fr; min-height: 6; }
+
+/* ================================================================ tables */
+
+DataTable { height: 1fr; background: $surface; scrollbar-size-vertical: 1; }
+DataTable > .datatable--header { background: $ls-raised; color: $ls-muted; text-style: bold; }
+DataTable > .datatable--header-hover { background: $ls-raised; }
+DataTable > .datatable--cursor { background: $ls-hover; text-style: none; }
+DataTable:focus > .datatable--cursor { background: $ls-selected; text-style: bold; }
+DataTable > .datatable--hover { background: $ls-hover; }
+DataTable > .datatable--even-row, DataTable > .datatable--odd-row { background: $surface; }
+
+/* ================================================================ controls */
+
+Button {
+    height: 3;
+    min-width: 10;
+    background: $surface;
+    color: $foreground;
+    border: round $ls-border;
+    text-style: none;
+}
+Button:hover { background: $ls-hover; border: round $ls-border; }
+Button:focus { border: round $primary; text-style: bold; background-tint: transparent; }
+Button.-primary { background: $ls-selected; border: round $primary 60%; color: $foreground; }
+Button.-primary:hover, Button.-primary:focus { background: $ls-selected; border: round $primary; }
+Button.-error { background: $surface; color: $error; border: round $error 40%; }
+Button.-error:hover, Button.-error:focus { background: $ls-hover; border: round $error; }
+Button:disabled { color: $ls-muted 60%; border: round $ls-border 50%; background: $surface; }
+LayerSmithApp.compact Button { height: 1; border: none; min-width: 8; margin-right: 1; }
+LayerSmithApp.compact Button:focus { border: none; text-style: bold reverse; }
+
+Input, TextArea { background: $background; border: round $ls-border; color: $foreground; }
+Input:focus, TextArea:focus { border: round $primary; background-tint: transparent; }
+Input > .input--placeholder { color: $ls-muted 70%; }
+Input.-invalid { border: round $error 70%; }
+Input.-invalid:focus { border: round $error; }
+Select > SelectCurrent { background: $background; border: round $ls-border; }
+Select:focus > SelectCurrent { border: round $primary; }
+Select > SelectOverlay { background: $ls-raised; border: round $primary; }
+.field-error { color: $error; height: auto; }
+Label { color: $ls-muted; margin-top: 1; }
+
+Checkbox { background: $surface; border: none; }
+Checkbox:focus { background-tint: transparent; text-style: bold; }
+SelectionList, OptionList { background: $surface; border: round $ls-border; }
+SelectionList:focus, OptionList:focus { border: round $primary; background-tint: transparent; }
+OptionList > .option-list--option-highlighted, SelectionList > .option-list--option-highlighted { background: $ls-hover; }
+OptionList:focus > .option-list--option-highlighted, SelectionList:focus > .option-list--option-highlighted { background: $ls-selected; }
+
+Tabs { background: $background; }
+Tab { color: $ls-muted; }
+Tab.-active { color: $foreground; text-style: bold; }
+Tabs:focus Tab.-active { color: $primary; }
+Underline > .underline--bar { background: $ls-border; color: $primary; }
+TabbedContent ContentSwitcher { height: 1fr; }
+TabPane { padding: 1 1 0 1; background: $surface; }
+
+Log, RichLog { background: $background; }
+
+Toast { background: $ls-raised; }
+
+/* ================================================================ footer */
+
+Footer { background: $background; border-top: solid $ls-border; height: 2; }
+LayerSmithApp.compact Footer { border-top: none; height: 1; }
+FooterKey { background: $background; }
+FooterKey .footer-key--key { background: transparent; color: $primary; text-style: bold; }
+FooterKey .footer-key--description { color: $ls-muted; }
+FooterKey:hover { background: $ls-hover; }
+
+/* ================================================================ wizards */
+
+.steps { height: 1; margin-bottom: 1; }
+.wizard-columns { height: 1fr; }
+.wizard-body { width: 1fr; height: 1fr; }
+.wizard-body > * { padding: 0 1; }
+.wizard-summary { width: 40; height: 1fr; margin-left: 2; }
+LayerSmithApp.medium .wizard-summary, LayerSmithApp.compact .wizard-summary { display: none; }
+.wizard-nav { height: 3; margin-top: 1; }
+LayerSmithApp.compact .wizard-nav { height: 1; margin-top: 0; }
+.wizard-nav Button { margin-left: 1; }
+.wizard-error { width: 1fr; height: 3; color: $error; content-align: left middle; }
+LayerSmithApp.compact .wizard-error { height: 1; }
+.file-row { height: auto; }
+.file-row Input { width: 1fr; }
+TextArea.script { height: 6; }
+.wizard-body OptionList { height: auto; max-height: 14; }
+.wizard-body SelectionList { height: auto; max-height: 16; }
+#conflict { height: auto; color: $warning; padding: 0 1; display: none; }
+#conflict-actions { height: auto; display: none; }
+#intents { height: auto; }
+#intents Select { width: 60; }
+
+/* ================================================================ detail pages */
+
+.screen-body { height: 1fr; margin: 1 2 0 2; }
+LayerSmithApp.compact .screen-body { margin: 0; }
+.filters { height: auto; }
+.filters Select { width: 26; margin-right: 1; }
+#findings { height: 2fr; }
+#scan-history { height: 1fr; }
+#cf-edit { height: 1fr; }
+
+/* ================================================================ dialogs */
+
+ModalScreen { align: center middle; background: $background 60%; }
+.dialog { width: 72; height: auto; max-height: 90%; border: round $primary; background: $surface; padding: 1 2; }
+.dialog.wide { width: 90%; }
+.dialog-title { color: $primary; text-style: bold; margin-bottom: 1; margin-top: 0; }
+.dialog-text { margin-bottom: 1; }
+.dialog-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+.dialog-buttons Button { margin-left: 1; }
+.dialog-scroll { height: auto; max-height: 30; }
+
+/* ================================================================ too small */
+
+#too-small { display: none; }
+LayerSmithApp.too-small #too-small {
+    display: block;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    text-align: center;
+    color: $warning;
+    text-style: bold;
+}
+LayerSmithApp.too-small #body,
+LayerSmithApp.too-small .screen-body,
+LayerSmithApp.too-small AppHeader { display: none; }
+
+#paths, #doctor-table { height: auto; max-height: 12; }
+.more-keys { margin-top: 1; height: auto; }
+LayerSmithApp.compact .stat, LayerSmithApp.medium .stat { text-wrap: nowrap; text-overflow: ellipsis; }

@@ -81,9 +81,26 @@ under **Manage Actions access** confirm the repository has `write`.
 - [ ] `docs/deployment.md` limitations still accurate
 - [ ] Screenshots in `docs/screenshots/` still show the current UI
 - [ ] Upgrade from the previous release tested with an existing `/data` volume
+- [ ] `docs/client.md` and `docs/client-features.md` match what the client does
 
 ## Release artifacts
 
-The container image is the distribution. Source archives come from GitHub
-automatically. Large image TARs are deliberately not attached to releases; an
+The container image is the distribution of the server. The terminal client
+(`client/`) is distributed as files: for a `vX.Y.Z` tag the `client.yml`
+workflow runs `client/scripts/build-release.sh X.Y.Z`, tests the offline
+archive with networking disabled, keeps the files as workflow artifacts and
+attaches them to the GitHub Release for that tag when the release exists:
+
+```
+layersmith_client-X.Y.Z-py3-none-any.whl
+layersmith-client-X.Y.Z-offline.tar.gz
+SHA256SUMS
+```
+
+Create the release (or let it be created) before the workflow finishes, or
+re-run the workflow afterwards. Locally, the same files come from
+`client/scripts/build-release.sh X.Y.Z` (needs pip, `uv` and PyPI access).
+The client is not published to PyPI.
+
+Source archives come from GitHub automatically. Large image TARs are deliberately not attached to releases; an
 air-gap bundle of LayerSmith itself can be added later if there is demand.

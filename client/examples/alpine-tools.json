@@ -1,0 +1,19 @@
+{
+  "format": "layersmith-project/v1",
+  "name": "alpine-tools",
+  "description": "Small Alpine image with a few network tools and a message of the day",
+  "template": "Minimal",
+  "mode": "gui",
+  "spec": {
+    "base": {"distribution": "Alpine", "version": "3.22"},
+    "architecture": "amd64",
+    "presets": [],
+    "packages": ["curl", "jq"],
+    "extra_packages": [],
+    "files": [
+      {"path": "motd.txt", "destination": "/etc/motd", "mode": "0644"}
+    ],
+    "env": [{"name": "TZ", "value": "UTC"}],
+    "tests": ["curl --version", "jq --version", "test -s /etc/motd"]
+  }
+}

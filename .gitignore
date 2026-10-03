@@ -47,3 +47,6 @@ secrets/
 .DS_Store
 .idea/
 .vscode/
+
+# Client build output (client/scripts/build-release.sh)
+client/build/

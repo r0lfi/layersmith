@@ -41,6 +41,19 @@ LAYERSMITH_SMOKE=1 .venv/bin/pytest tests/test_runtime_smoke.py -v
 Runtimes that are not installed are skipped, so this runs what your machine
 can actually run.
 
+The terminal client has its own package and tests:
+
+```bash
+cd client
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]' -e ../backend
+.venv/bin/pytest                 # CLI, TUI (headless) and the real API with a fake runtime
+```
+
+Without the backend installed, the tests against the real API are skipped
+and the rest still run - which is also how the client is meant to live: on a
+machine that has no server.
+
 ## Building locally
 
 ```bash
@@ -70,7 +83,7 @@ local Node.
 
 1. Branch from `main`.
 2. Keep the change focused; unrelated cleanups are easier to review separately.
-3. Make sure `pytest` and `npm run build` both pass — CI runs exactly those.
+3. Make sure `pytest` (backend and client) and `npm run build` pass — CI runs exactly those.
 4. Describe what changes for a user, and anything you deliberately left out.
 
 ## Reporting bugs

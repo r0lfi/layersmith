@@ -1,0 +1,83 @@
+# The terminal client (client/): tests on every supported Python, and for a
+# release tag the wheel and the offline archive, installed once with
+# networking disabled before they are kept.
+
+name: Client
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Client tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the oldest the client supports; the server needs 3.11+, so
+        # the tests against the real API only run on the newer versions.
+        python: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          pip install -e './client[dev]'
+          if python -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then pip install -e ./backend; fi
+      - name: Test
+        working-directory: client
+        run: pytest -q
+
+  package:
+    name: Wheel and offline archive
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write   # attach the files to the GitHub Release of a tag
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          pip install uv
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="0.0.0.dev0"; fi
+          client/scripts/build-release.sh "$VERSION" "$PWD/client-dist"
+      # The offline promise, checked: no network while installing.
+      - name: Install offline on Python 3.9 and 3.13
+        run: |
+          for py in 3.9 3.13; do
+            mkdir -p "offline-$py"
+            tar -C "offline-$py" -xzf client-dist/layersmith-client-*-offline.tar.gz
+            docker run --rm --network none -v "$PWD/offline-$py:/b:ro" "python:$py-slim" sh -ec '
+              cd /b/layersmith-client-*-offline
+              sha256sum -c SHA256SUMS
+              python -m venv /tmp/v
+              /tmp/v/bin/pip install --no-index --find-links wheelhouse layersmith-client
+              /tmp/v/bin/layersmith version
+              /tmp/v/bin/python -c "import layersmith_client.tui.app"'
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layersmith-client
+          path: client-dist/*
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" client-dist/* --clobber
+          else
+            echo "No GitHub Release for $GITHUB_REF_NAME yet; the files are kept as workflow artifacts." >> "$GITHUB_STEP_SUMMARY"
+          fi
