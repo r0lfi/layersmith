@@ -46,6 +46,10 @@ def start_server(data_dir: Path, populate: bool):
                 on_log(line)
             return super().build(context_dir, image_ref, architecture, lambda line: None)
 
+        def export(self, image_ref, destination, on_log, archive_format=None):
+            super().export(image_ref, destination, on_log, archive_format)
+            return 47_300_000  # what a real archive of the 118 MB image weighs, for the log line
+
     settings = server_config.reset_for_tests(data_dir=data_dir, scanner="none")
     app = create_app(settings)
     backend = DemoBackend()
@@ -92,7 +96,8 @@ def start_server(data_dir: Path, populate: bool):
     return url, server
 
 
-async def capture(url: str | None, out: Path, size: tuple[int, int], views: list[str], prefix: str) -> None:
+async def capture(url: str | None, out: Path, size: tuple[int, int], views: list[str], prefix: str,
+                  select: str | None = None) -> None:
     from layersmith_client.api import ApiClient
     from layersmith_client.config import ClientConfig
     from layersmith_client.tui.app import LayerSmithApp
@@ -121,6 +126,11 @@ async def capture(url: str | None, out: Path, size: tuple[int, int], views: list
                     app.current_view().focus_main()
                     await pilot.press("down")
                     await settle()
+                if view == "projects" and select:
+                    table = app.query_one("#project-table")
+                    ids = {p["name"]: p["id"] for p in app.query_one("#projects").projects.values()}
+                    table.select_key(ids[select])
+                    await settle(12)
             name = f"{prefix}{view}-{size[0]}x{size[1]}.svg"
             app.save_screenshot(filename=name, path=str(out))
         if url and not prefix:
@@ -146,6 +156,7 @@ def main() -> int:
     parser.add_argument("output")
     parser.add_argument("--sizes", default="160x48,120x36,100x30,80x24")
     parser.add_argument("--views", default="projects,dashboard,builds,create,training,scans,exports,settings")
+    parser.add_argument("--select", help="project to select on the Projects page, e.g. net-tools")
     args = parser.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
@@ -154,7 +165,7 @@ def main() -> int:
         url, _ = start_server(Path(full), populate=True)
         empty_url, _ = start_server(Path(empty) / "data", populate=False)
         for size in sizes:
-            asyncio.run(capture(url, out, size, args.views.split(","), ""))
+            asyncio.run(capture(url, out, size, args.views.split(","), "", args.select))
         asyncio.run(capture(empty_url, out, sizes[0], ["projects", "dashboard"], "empty-"))
         asyncio.run(capture(None, out, sizes[0], ["start"], "disconnected-"))
         asyncio.run(capture(None, out, (80, 24), ["start"], "disconnected-"))

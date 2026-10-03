@@ -11,6 +11,13 @@
   a TAR archive or an air-gap bundle.
 </p>
 
+<p align="center">
+  The same server can be driven from a terminal on another machine: the
+  <a href="#terminal-client">LayerSmith terminal client</a> brings an
+  interactive TUI and a scriptable CLI to a jumphost or laptop, with no
+  container runtime and no access to the container host needed.
+</p>
+
 <p align="center"><sub>by xnett.org</sub></p>
 
 <p align="center">
@@ -89,7 +96,13 @@ and shows you the Containerfile it produced before anything is built.
   image after each build (dependencies, CPU smoke test, offline example), and
   a Getting started for the exact image. See [docs/training.md](docs/training.md).
 - **Podman or Docker** as the build backend.
-- **API first** — the web UI uses the same HTTP API you can script against.
+- **Terminal client** — `layersmith` on any machine with Python 3.9+: an
+  interactive TUI (projects, wizards, live logs, scans, exports) and a CLI
+  with JSON output for scripts. Builds keep running on the server when the
+  client disconnects; downloads land on your machine, checked against the
+  server's SHA256. See [docs/client.md](docs/client.md).
+- **API first** — the web UI and the terminal client use the same HTTP API
+  you can script against.
 
 ## Screenshots
 
@@ -154,21 +167,55 @@ Profiles, versions, measured image sizes and the offline workflow:
 
 ## Terminal client
 
-LayerSmith can also be used from a terminal on another machine - a
-jumphost, a laptop, an admin server - through the same API as the web UI:
+LayerSmith can also be used from a terminal on another machine - a jumphost,
+a laptop, an admin server - through the same API as the web UI. A project
+created in the terminal shows up in the browser and the other way round.
+
+![LayerSmith terminal client, Projects](docs/screenshots/tui-projects.png)
 
 ```bash
 layersmith config set server https://layersmith.example.org
 layersmith                          # interactive terminal interface
-layersmith build my-image --follow  # or the command line, for scripts
+layersmith projects list            # or the command line, for scripts
+layersmith build my-image --follow
 layersmith export 12 --output ./image.tar
+layersmith --json builds list       # machine-readable output
 ```
 
-The client is a separate, pure-Python package (`client/`, Python 3.9+) with
-an offline installation archive. It needs no container runtime and no
-access to the container host; builds keep running on the server when the
-client disconnects. See [docs/client.md](docs/client.md) and the
-[feature matrix](docs/client-features.md).
+- **Interactive TUI** — dashboard, projects with details and the live log of
+  their latest build, the image and LLM training wizards, builds, scans,
+  exports and settings. Keyboard driven, works at 80x24, needs no special
+  font, and every status is a word as well as a colour (`NO_COLOR` works).
+- **CLI for scripts** — every web UI function as a command, `--json` and
+  JSON Lines for followed jobs, documented exit codes, no prompts without a
+  terminal, `--yes` for destructive actions.
+- **Remote by design** — local files are uploaded, downloads stream to your
+  machine and are verified; a lost connection never looks like a finished
+  build, and `layersmith builds wait <id>` re-attaches to one that is still
+  running.
+- **Safe on the network** — TLS always verified (internal CA supported),
+  HTTP Basic or client certificates for an authenticating proxy, no
+  credentials on the command line.
+
+![LayerSmith terminal client, Dashboard](docs/screenshots/tui-dashboard.png)
+
+**Install.** The client is a separate, pure-Python package in `client/`
+(`layersmith-client`, Python 3.9+, no server or container tools). It is not
+on PyPI. `client/scripts/build-release.sh X.Y.Z` builds the wheel and an
+offline archive with every dependency for Python 3.9-3.13; from the next
+release these files are attached to the GitHub Release. Then, on the client
+machine:
+
+```bash
+tar -xzf layersmith-client-X.Y.Z-offline.tar.gz && cd layersmith-client-X.Y.Z-offline
+sha256sum -c SHA256SUMS
+pipx install --pip-args="--no-index --find-links=$PWD/wheelhouse" layersmith-client
+layersmith config set server https://layersmith.example.org
+layersmith doctor
+```
+
+Full guide: [docs/client.md](docs/client.md) · what the terminal covers of
+the web UI: [docs/client-features.md](docs/client-features.md).
 
 ## Two kinds of image
 
