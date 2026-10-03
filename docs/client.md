@@ -59,15 +59,22 @@ Requirements on the client machine: **Python 3.9 or newer** with `venv` (or
 Ubuntu 22.04 and newer. The client is pure Python, so it runs on any Linux
 architecture; it is tested on Linux x86_64.
 
-The client is distributed as two release files, built by
-`client/scripts/build-release.sh` (see [Building the client](#building-the-client)):
+The client is distributed as two files attached to every
+[GitHub Release](https://github.com/r0lfi/layersmith/releases) from v0.4.0 on
+(built by `client/scripts/build-release.sh`, see
+[Building the client](#building-the-client)), with a `SHA256SUMS`:
 
 | File | Contents |
 | --- | --- |
 | `layersmith_client-<version>-py3-none-any.whl` | the client alone; its dependencies come from PyPI |
 | `layersmith-client-<version>-offline.tar.gz` | the client wheel plus every dependency for Python 3.9-3.13, `SHA256SUMS` and `INSTALL.txt` |
 
-It is not published on PyPI. Copy the file you need to the client machine.
+It is not published on PyPI. Download the file you need, or copy it to a
+client machine without internet access:
+
+```bash
+curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.4.0/layersmith-client-0.4.0-offline.tar.gz
+```
 
 With network access to PyPI, from the wheel:
 
