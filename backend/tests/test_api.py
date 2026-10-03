@@ -198,3 +198,40 @@ def test_a_removed_archive_is_not_offered_for_download(client):
     body = client.get(f"/api/builds/{build['id']}").json()
     assert body["has_export"] is False
     assert client.get(f"/api/builds/{build['id']}/download/export").status_code == 404
+
+
+def test_health_lists_optional_api_features(client):
+    body = client.get("/api/health").json()
+    assert "log-offset" in body["api_features"] and "limits" in body["api_features"]
+
+
+def test_settings_report_upload_limits(client):
+    limits = client.get("/api/settings").json()["limits"]
+    assert limits["max_upload_bytes"] > 0 and limits["max_files_per_image"] > 0 and limits["max_context_bytes"] > 0
+
+
+def test_log_can_be_read_incrementally_by_offset(client):
+    project = client.post("/api/projects", json={
+        "name": "log-reader", "spec": {"base": {"distribution": "Alpine", "version": "3.22"}}}).json()
+    started = client.post(f"/api/projects/{project['id']}/builds", json={}).json()
+    run_pending_build(client, started["id"])
+
+    whole = client.get(f"/api/builds/{started['id']}/log").json()
+    assert whole["finished"] and whole["complete"] and whole["offset"] == 0
+    assert "STEP 1/2" in whole["text"] and whole["next_offset"] == whole["size"]
+
+    # A resumed reader gets only what follows its offset, and nothing twice.
+    first = client.get(f"/api/builds/{started['id']}/log", params={"limit": 90}).json()
+    assert not first["complete"] and first["text"].endswith("\n")
+    rest = client.get(f"/api/builds/{started['id']}/log", params={"offset": first["next_offset"]}).json()
+    assert first["text"] + rest["text"] == whole["text"]
+
+    tail = client.get(f"/api/builds/{started['id']}/log", params={"tail": 30}).json()
+    assert tail["offset"] > 0 and whole["text"].endswith(tail["text"]) and len(tail["text"]) <= 30
+
+    past = client.get(f"/api/builds/{started['id']}/log", params={"offset": 10**9}).json()
+    assert past["text"] == "" and past["next_offset"] == whole["size"]
+
+
+def test_log_of_unknown_build_is_404(client):
+    assert client.get("/api/builds/missing/log").status_code == 404

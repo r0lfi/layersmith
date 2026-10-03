@@ -50,6 +50,13 @@ router = APIRouter(prefix="/api")
 #: Bounds on how much of a build log is handed to a client at once.
 LOG_REPLY_CHARS = 500_000
 LOG_REPLAY_LINES = 5_000
+#: Default and largest slice of a log returned by one incremental read.
+LOG_CHUNK_BYTES = 256 * 1024
+LOG_CHUNK_MAX_BYTES = 1024 * 1024
+
+#: Optional API additions a client can check for instead of guessing from the
+#: version. Additive only: a client must keep working without any of them.
+API_FEATURES = ["log-offset", "limits"]
 
 
 # ------------------------------------------------------------- schemas
@@ -203,7 +210,7 @@ def _safe_download(path_value: str | None, allowed_dirs: list[Path]) -> Path:
 def health():
     """Liveness for the container healthcheck and for upgrade checks."""
     return {"status": "ok", "app": config.APP_NAME, "version": config.VERSION,
-            "revision": config.REVISION}
+            "revision": config.REVISION, "api_features": API_FEATURES}
 
 
 @router.get("/catalog")
@@ -244,6 +251,11 @@ def get_settings(state=Depends(get_state)):
         "scanner": scanners.describe(app_settings),
         "paths": path_rows,
         "storage": {"total": usage.total, "used": usage.used, "free": usage.free},
+        # What the server refuses, so a remote client can say so before it
+        # uploads half a gigabyte. The server still enforces every one.
+        "limits": {"max_upload_bytes": app_settings.max_upload_bytes,
+                   "max_files_per_image": app_settings.max_files_per_image,
+                   "max_context_bytes": app_settings.max_context_bytes},
     }
 
 
@@ -542,6 +554,56 @@ def get_build(build_id: str, state=Depends(get_state)):
         return {**_build_json(build, project), "containerfile": build.containerfile, "log": log,
                 "manifest": manifest_for(project, build, build.export_sha256),
                 "training": _training_detail(build, scanned=_has_completed_scan(session, build.id))}
+
+
+@router.get("/builds/{build_id}/log")
+def build_log(build_id: str, offset: int = 0, limit: int = LOG_CHUNK_BYTES, tail: int | None = None,
+              state=Depends(get_state)):
+    """A slice of the build log by byte offset, for clients that poll.
+
+    The WebSocket suits a browser; a terminal client on a jumphost may lose
+    its connection at any time and has to resume where it stopped without
+    fetching the whole log again. `tail` starts that many bytes before the
+    end instead, on a line boundary. Only whole lines are returned while the
+    build runs, unless one line is larger than the slice.
+    """
+    limit = max(1, min(limit, LOG_CHUNK_MAX_BYTES))
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        status, stored = build.status, build.log or ""
+    finished = status in ("ready", "failed", "cancelled")
+
+    log_file = state["build_service"].log_path(build_id)
+    try:
+        size = log_file.stat().st_size
+    except FileNotFoundError:
+        log_file, size = None, len(stored.encode("utf-8"))  # what the record kept
+    if tail is not None:
+        offset = size - max(0, tail)
+    offset = max(0, min(offset, size))
+    if log_file is not None:
+        with open(log_file, "rb") as handle:
+            handle.seek(offset)
+            data = handle.read(limit + 1)
+    else:
+        data = stored.encode("utf-8")[offset:offset + limit + 1]
+
+    if tail is not None and offset > 0:
+        newline = data.find(b"\n")
+        if newline >= 0:
+            offset, data = offset + newline + 1, data[newline + 1:]
+    more = len(data) > limit
+    data = data[:limit]
+    if more or not finished:
+        last = data.rfind(b"\n")
+        if last >= 0:
+            data = data[:last + 1]
+    next_offset = offset + len(data)
+    return {"build_id": build_id, "status": status, "finished": finished, "offset": offset,
+            "next_offset": next_offset, "size": size, "complete": finished and next_offset >= size,
+            "text": data.decode("utf-8", errors="replace")}
 
 
 def _has_completed_scan(session, build_id: str) -> bool:
