@@ -63,7 +63,15 @@ def generate(project, spec, base_digest=None, image_ref=None):
     base = spec["base"]["source"]
     repository = base.split("@", 1)[0].rsplit(":", 1)[0]
     recipe = None
-    if spec.get("training"):
+    gpu_recipe = None
+    gpu_render = None
+    if spec.get("gpu_benchmark"):
+        from layersmith.gpu_benchmark import render as gpu_render
+
+        gpu_recipe = gpu_render.recipe_for(spec["gpu_benchmark"])
+        packages, warnings = resolve_packages({**spec, "packages": gpu_render.system_packages(gpu_recipe),
+                                               "presets": [], "extra_packages": []})
+    elif spec.get("training"):
         from layersmith.training import recipes, render
 
         recipe = recipes.resolve(spec["training"], spec.get("architecture"))
@@ -93,17 +101,25 @@ def generate(project, spec, base_digest=None, image_ref=None):
     if recipe:
         labels["org.opencontainers.image.base.name"] = recipe["base"]["display"]
         labels.update(render.labels(recipe))
+    if gpu_recipe:
+        labels["org.opencontainers.image.base.name"] = gpu_recipe["base"]
+        labels.update(gpu_render.labels(gpu_recipe))
     lines.append("LABEL " + " \\\n      ".join(f"{k}={_quote(v)}" for k, v in labels.items()))
 
     if scripts.get("pre_build"):
         lines += ["", f"COPY --chmod=0755 scripts/pre-build.sh {SHARE_DIR}/pre-build.sh",
                   f"RUN {SHARE_DIR}/pre-build.sh"]
 
+    if gpu_recipe:
+        lines += ["", *gpu_render.apt_mirror_prelude(gpu_recipe)]
+
     install = _install(family, packages, epel=bool(spec.get("enable_epel")) and el)
     if install:
         lines += ["", install]
     if recipe:
         lines += render.install_lines(recipe)
+    if gpu_recipe:
+        lines += gpu_render.install_lines(gpu_recipe)
 
     for tool in spec.get("tools") or []:
         lines.append(f"COPY --chmod={tool['mode']} tools/{tool['sha256']} {tool['install_path']}")

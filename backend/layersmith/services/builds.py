@@ -84,8 +84,17 @@ def training_recipe(spec: dict | None) -> dict | None:
     return recipes.resolve(spec["training"], spec.get("architecture"))
 
 
+def gpu_benchmark_recipe(spec: dict | None) -> dict | None:
+    if not (spec or {}).get("gpu_benchmark"):
+        return None
+    from layersmith.gpu_benchmark import catalog
+
+    return catalog.resolve(spec["gpu_benchmark"])
+
+
 def manifest_for(project: Project, build: Build, export_sha: str | None = None) -> dict:
     recipe = training_recipe(build.spec)
+    gpu_recipe = gpu_benchmark_recipe(build.spec)
     training = None
     if recipe:
         training = {"profile": recipe["profile"], "profile_version": recipe["profile_version"],
@@ -114,6 +123,11 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
         "layersmith_version": config.VERSION,
         "layersmith_revision": config.REVISION,
         **({"training": training} if training else {}),
+        **({"gpu_benchmark": {"cuda_version": gpu_recipe["cuda_version"],
+                               "python_version": gpu_recipe["python_full_version"],
+                               "tools": gpu_recipe["tools"], "torch": gpu_recipe["torch"],
+                               "vllm": gpu_recipe["vllm"], "nccl_tests": gpu_recipe["nccl_tests"]}}
+           if gpu_recipe else {}),
     }
 
 
@@ -269,6 +283,11 @@ class BuildService:
             from layersmith.training import docs, render
 
             render.write_context(context, recipe, docs.markdown(recipe, build.image_ref or "IMAGE"))
+        gpu_recipe = gpu_benchmark_recipe(build.spec)
+        if gpu_recipe:
+            from layersmith.gpu_benchmark import render
+
+            render.write_context(context, gpu_recipe, build.image_ref or "IMAGE")
         return context
 
     # --------------------------------------------------------------- run
@@ -443,7 +462,9 @@ class BuildService:
                                     archive_format=getattr(self.backend, "archive_format", "OCI archive"),
                                     extra=("  training/README.md       Getting started, examples, what to bring\n"
                                            "                           separately (models, data), check results\n"
-                                           if training_recipe(build.spec) else "")),
+                                           if training_recipe(build.spec) else "")
+                                    + ("  gpu-benchmark/README.md Getting started and runtime requirements\n"
+                                       if gpu_benchmark_recipe(build.spec) else "")),
                 encoding="utf-8")
 
             # What was known about this image when it was bundled. Absent
@@ -457,6 +478,18 @@ class BuildService:
                 security = staging / "security"
                 scanned = security.is_dir() and any(p.name != "NOT-SCANNED.txt" for p in security.iterdir())
                 self._training_bundle(build, recipe, staging, f"image/{export.name}", scanned)
+            gpu_recipe = gpu_benchmark_recipe(build.spec)
+            if gpu_recipe:
+                from layersmith.gpu_benchmark import render
+
+                target = staging / "gpu-benchmark"
+                target.mkdir()
+                (target / "README.md").write_text(
+                    render.markdown(gpu_recipe, build.image_ref or "IMAGE"), encoding="utf-8")
+                (target / "recipe.json").write_text(json.dumps(
+                    {key: gpu_recipe.get(key) for key in ("cuda_version", "python_full_version", "tools",
+                                                          "torch", "vllm", "transformers", "tokenizers",
+                                                          "nccl_tests")}, indent=2) + "\n", encoding="utf-8")
 
             sums = []
             for path in sorted(staging.rglob("*")):

@@ -115,7 +115,13 @@ def validate_spec(spec):
     """Normalise and validate a wizard specification. Raises InvalidSpec."""
     spec = json.loads(json.dumps(spec or {}))  # reject non-JSON values early
 
-    if spec.get("training"):
+    has_training = bool(spec.get("training"))
+    has_gpu_benchmark = spec.get("gpu_benchmark") is not None and "gpu_benchmark" in spec
+    if has_training and has_gpu_benchmark:
+        raise InvalidSpec("Choose either an LLM training profile or the GPU benchmark template, not both.")
+    if has_gpu_benchmark:
+        _apply_gpu_benchmark(spec)
+    if has_training:
         _apply_training(spec)
 
     base = spec.get("base") or {}
@@ -234,6 +240,26 @@ def _apply_training(spec):
     }
     spec["architecture"] = recipe["architecture"]
     spec["base"] = {"source": recipe["base"]["reference"], "family": "deb", "display": recipe["base"]["display"]}
+
+
+def _apply_gpu_benchmark(spec):
+    """The benchmark recipe owns its CUDA base while keeping the request small."""
+    from layersmith.gpu_benchmark import catalog as gpu_catalog
+
+    request = spec["gpu_benchmark"]
+    if not isinstance(request, dict):
+        raise InvalidSpec("gpu_benchmark must be an object")
+    try:
+        recipe = gpu_catalog.resolve(request)
+    except gpu_catalog.RecipeError as exc:
+        raise InvalidSpec(str(exc)) from exc
+    spec["gpu_benchmark"] = {"cuda_version": recipe["cuda_version"],
+                             "python_version": recipe["python_version"], "tools": recipe["tools"],
+                             "mirrors": recipe["mirrors"]}
+    if spec.get("architecture") not in (None, "amd64"):
+        raise InvalidSpec("The NVIDIA GPU Benchmark Toolkit currently supports amd64 CUDA images only.")
+    spec["architecture"] = "amd64"
+    spec["base"] = {"source": recipe["base"], "family": "deb", "display": recipe["base"]}
 
 
 def resolve_packages(spec):

@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, Catalog, Spec } from "../api";
 import { Banner, Card, Field, useLoad } from "../components/ui";
 import TrainingWizard from "./TrainingWizard";
+import GpuBenchmarkWizard from "./GpuBenchmarkWizard";
 
 const STEPS = ["Purpose", "Base", "Version", "Tools", "Packages", "Files", "Scripts", "Image", "Review"] as const;
 
@@ -65,11 +66,14 @@ const CATEGORIES = [
   { id: "general", name: "General purpose", description: "Shells, admin, network, development and cluster tools" },
   { id: "llm-training", name: "LLM Training & Fine-tuning",
     description: "Ready-to-run environments for fine-tuning and training language models" },
+  { id: "gpu-benchmark", name: "AI / ML / GPU",
+    description: "Build NVIDIA CUDA, vLLM, memory and multi-node NCCL benchmark images" },
 ];
 
 export default function NewProject() {
   const [params, setParams] = useSearchParams();
-  const category = params.get("category") === "llm-training" ? "llm-training" : "general";
+  const category = ["llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
+    ? params.get("category")! : "general";
   const setCategory = (id: string) =>
     setParams((current) => {
       const next = new URLSearchParams(current);
@@ -94,6 +98,8 @@ export default function NewProject() {
       </div>
       {category === "llm-training" ? (
         <TrainingWizard onLeave={() => setCategory("general")} />
+      ) : category === "gpu-benchmark" ? (
+        <GpuBenchmarkWizard onLeave={() => setCategory("general")} />
       ) : (
         <GeneralWizard />
       )}

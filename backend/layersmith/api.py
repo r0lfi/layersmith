@@ -40,10 +40,13 @@ from layersmith.services import storage
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 from layersmith.services.scanning import ScanError, ScanService, finding_row, summarise, sweep_temporary_exports
 from layersmith.services.builds import training_recipe
+from layersmith.services.builds import gpu_benchmark_recipe
 from layersmith.training import catalog as training_catalog
 from layersmith.training import checks as training_checks
 from layersmith.training import docs as training_docs
 from layersmith.training import recipes as training_recipes
+from layersmith.gpu_benchmark import catalog as gpu_benchmark_catalog
+from layersmith.gpu_benchmark import render as gpu_benchmark_render
 
 router = APIRouter(prefix="/api")
 
@@ -97,6 +100,10 @@ class StorageIn(BaseModel):
 class TrainingResolveIn(BaseModel):
     training: dict = Field(default_factory=dict)
     architecture: str | None = None
+
+
+class GpuBenchmarkResolveIn(BaseModel):
+    gpu_benchmark: dict = Field(default_factory=dict)
 
 
 class GpuReportIn(BaseModel):
@@ -162,6 +169,15 @@ def _training_detail(build: Build, scanned: bool = False) -> dict | None:
         "export_contents": training_docs.export_contents(recipe, scanned=scanned),
         "before_build": training_docs.before_build(recipe),
     }
+
+
+def _gpu_benchmark_detail(build: Build) -> dict | None:
+    recipe = gpu_benchmark_recipe(build.spec)
+    if recipe is None:
+        return None
+    return {"recipe": recipe,
+            "getting_started": gpu_benchmark_render.getting_started(recipe, build.image_ref or "IMAGE"),
+            "readme": gpu_benchmark_render.markdown(recipe, build.image_ref or "IMAGE")}
 
 
 def _downloadable(path_value: str | None) -> bool:
@@ -553,7 +569,8 @@ def get_build(build_id: str, state=Depends(get_state)):
             log = log_file.read_text(encoding="utf-8")[-LOG_REPLY_CHARS:] if log_file.is_file() else ""
         return {**_build_json(build, project), "containerfile": build.containerfile, "log": log,
                 "manifest": manifest_for(project, build, build.export_sha256),
-                "training": _training_detail(build, scanned=_has_completed_scan(session, build.id))}
+                "training": _training_detail(build, scanned=_has_completed_scan(session, build.id)),
+                "gpu_benchmark": _gpu_benchmark_detail(build)}
 
 
 @router.get("/builds/{build_id}/log")
@@ -659,6 +676,26 @@ def training_resolve(payload: TrainingResolveIn):
             "export_contents": training_docs.export_contents(recipe, scanned=None),
             "before_build": training_docs.before_build(recipe),
             "getting_started": training_docs.getting_started(recipe, "IMAGE")}
+
+
+@router.get("/gpu-benchmark/catalog")
+def gpu_benchmark_catalog_view():
+    return {"category": gpu_benchmark_catalog.CATEGORY,
+            "cuda_variants": gpu_benchmark_catalog.CUDA_VARIANTS,
+            "python_versions": gpu_benchmark_catalog.PYTHON_VERSIONS,
+            "tool_groups": gpu_benchmark_catalog.TOOL_GROUPS,
+            "defaults": {"cuda_version": "13.0.2", "python_version": "3.12",
+                         "tools": gpu_benchmark_catalog.DEFAULT_TOOLS}}
+
+
+@router.post("/gpu-benchmark/resolve")
+def gpu_benchmark_resolve(payload: GpuBenchmarkResolveIn):
+    try:
+        recipe = gpu_benchmark_catalog.resolve(payload.gpu_benchmark)
+    except gpu_benchmark_catalog.RecipeError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "recipe": recipe,
+            "getting_started": gpu_benchmark_render.getting_started(recipe, "IMAGE")}
 
 
 @router.post("/builds/{build_id}/airgap", status_code=201)

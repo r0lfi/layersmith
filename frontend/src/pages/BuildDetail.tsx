@@ -168,6 +168,27 @@ export default function BuildDetail() {
         />
       )}
 
+      {build.gpu_benchmark && (
+        <div style={{ marginTop: "1rem" }}>
+          <Card title="NVIDIA GPU Benchmark Toolkit">
+            <p className="faint">{build.gpu_benchmark.getting_started.summary}</p>
+            <p className="mono faint">
+              CUDA {build.gpu_benchmark.recipe.cuda_version} · Python {build.gpu_benchmark.recipe.python_full_version}
+              {` · PyTorch ${build.gpu_benchmark.recipe.torch}`}
+              {build.gpu_benchmark.recipe.vllm ? ` · vLLM ${build.gpu_benchmark.recipe.vllm}` : " · vLLM not installed"}
+              {` · ${build.gpu_benchmark.recipe.tools.join(", ")}`}
+            </p>
+            <div className="grid two">
+              <div><h3>Podman</h3><pre className="code">{build.gpu_benchmark.getting_started.podman}</pre></div>
+              <div><h3>Docker</h3><pre className="code">{build.gpu_benchmark.getting_started.docker}</pre></div>
+            </div>
+            <h3>Commands</h3>
+            <pre className="code">{build.gpu_benchmark.getting_started.commands.join("\n")}</pre>
+            <p className="faint">{build.gpu_benchmark.getting_started.notes.join(" ")}</p>
+          </Card>
+        </div>
+      )}
+
       {build.status === "ready" && (
         <SecurityPanel
           buildId={build.id}

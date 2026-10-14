@@ -39,6 +39,7 @@ export interface Build {
   manifest?: Record<string, unknown>;
   training_profile?: string | null;
   training?: TrainingDetail | null;
+  gpu_benchmark?: GpuBenchmarkDetail | null;
 }
 
 /* ------------------------------------------------- LLM training profiles */
@@ -274,6 +275,59 @@ export interface Spec {
   workdir?: string;
   tag_latest?: boolean;
   training?: TrainingRequest;
+  gpu_benchmark?: GpuBenchmarkRequest;
+}
+
+export interface GpuBenchmarkRequest {
+  cuda_version: string;
+  python_version: string;
+  tools: string[];
+  mirrors?: Partial<Record<"apt_main" | "apt_security" | "pypi_index" | "torch_index" | "python_mirror" | "cuda_samples_repository" | "nccl_tests_repository", string>>;
+}
+
+export interface GpuBenchmarkRecipe extends GpuBenchmarkRequest {
+  base: string;
+  python_full_version: string;
+  torch: string;
+  vllm?: string | null;
+  transformers?: string | null;
+  tokenizers?: string | null;
+  nccl_tests: string;
+  mirrors: Record<string, string>;
+}
+
+export interface GpuBenchmarkCatalog {
+  category: { id: string; name: string; intro: string; template: string; description: string };
+  cuda_variants: Record<string, { base: string; torch: string; vllm?: string | null }>;
+  python_versions: Record<string, string>;
+  tool_groups: Record<string, string>;
+  defaults: GpuBenchmarkRequest;
+}
+
+export interface GpuBenchmarkGettingStarted {
+  title: string;
+  summary: string;
+  image: string;
+  cuda: string;
+  python: string;
+  tools: string[];
+  podman: string;
+  docker: string;
+  commands: string[];
+  notes: string[];
+}
+
+export interface GpuBenchmarkDetail {
+  recipe: GpuBenchmarkRecipe;
+  getting_started: GpuBenchmarkGettingStarted;
+  readme: string;
+}
+
+export interface GpuBenchmarkResolve {
+  ok: boolean;
+  error?: string;
+  recipe?: GpuBenchmarkRecipe;
+  getting_started?: GpuBenchmarkGettingStarted;
 }
 
 export interface Catalog {
@@ -405,6 +459,11 @@ export const api = {
   trainingCatalog: () => request<TrainingCatalog>("/training/catalog"),
   trainingResolve: (training: TrainingRequest, architecture?: string) =>
     request<TrainingResolve>("/training/resolve", { method: "POST", body: JSON.stringify({ training, architecture }) }),
+  gpuBenchmarkCatalog: () => request<GpuBenchmarkCatalog>("/gpu-benchmark/catalog"),
+  gpuBenchmarkResolve: (gpu_benchmark: GpuBenchmarkRequest) =>
+    request<GpuBenchmarkResolve>("/gpu-benchmark/resolve", {
+      method: "POST", body: JSON.stringify({ gpu_benchmark }),
+    }),
   gpuReport: (buildId: string, report: string) =>
     request<TrainingDetail>(`/builds/${buildId}/gpu-report`, { method: "POST", body: JSON.stringify({ report }) }),
 
