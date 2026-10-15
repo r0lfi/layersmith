@@ -116,6 +116,17 @@ p { margin: 0.4rem 0; }
 .tile.selected { border-color: var(--accent); background: var(--accent-soft); }
 .tile-title { font-weight: 600; }
 .tile-sub { color: var(--text-faint); font-size: 0.82rem; }
+.tile-title-icon { display: flex; align-items: center; gap: 0.45rem; }
+.tile-icon { flex: none; color: #76b900; }
+.tile-gpu { border-color: rgba(118, 185, 0, 0.45); }
+.tile-gpu:hover { border-color: #76b900; }
+.check-fixed { opacity: 0.75; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; font-size: 0.88rem; }
+.kv dt { color: var(--text-faint); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.size-meter { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; margin: 0.4rem 0; }
+.size-meter span { display: block; height: 100%; background: var(--accent); }
+.size-meter.low span { background: #e9b75a; }
 
 /* --------------------------------------------------------- controls */
 

@@ -84,6 +84,32 @@ def training_recipe(spec: dict | None) -> dict | None:
     return recipes.resolve(spec["training"], spec.get("architecture"))
 
 
+def gpu_benchmark_storage(recipe: dict | None = None) -> dict:
+    """Free space where images are exported, against what a GPU benchmark build needs.
+
+    The image itself (layers in the runtime's store) and its uncompressed
+    export both need room, plus temporary space while the layers are written,
+    so the requirement is about 2.5x the image size.
+    """
+    import os
+
+    settings = config.settings()
+    if recipe is None:
+        from layersmith.gpu_benchmark import catalog
+
+        recipe = catalog.resolve()
+    estimate = recipe["estimated_size_gb"]
+    required = float(os.environ.get("LAYERSMITH_GPU_MIN_FREE_GB") or round(estimate * 2.5, 1))
+    try:
+        free = shutil.disk_usage(settings.image_dir).free
+    except OSError:
+        free = None
+    return {"estimated_image_gb": estimate, "required_free_gb": required,
+            "free_gb": round(free / 1e9, 1) if free is not None else None,
+            "path": str(settings.image_dir),
+            "enough": None if free is None else free / 1e9 >= required}
+
+
 def gpu_benchmark_recipe(spec: dict | None) -> dict | None:
     if not (spec or {}).get("gpu_benchmark"):
         return None
@@ -312,6 +338,19 @@ class BuildService:
         try:
             with self.session_factory() as session:
                 build = session.get(Build, build_id)
+
+                gpu_recipe = gpu_benchmark_recipe(build.spec)
+                if gpu_recipe:
+                    space = gpu_benchmark_storage(gpu_recipe)
+                    self._emit(build_id, f"GPU benchmark image: about {space['estimated_image_gb']} GB; "
+                                         f"{space['free_gb']} GB free at {space['path']}, "
+                                         f"{space['required_free_gb']} GB needed")
+                    if space["enough"] is False:
+                        raise BuildError(
+                            f"Not enough disk space for the GPU benchmark image: {space['free_gb']} GB free at "
+                            f"{space['path']}, about {space['required_free_gb']} GB needed (image layers plus the "
+                            "exported archive). Free space or move LAYERSMITH_DATA_DIR to a larger volume; "
+                            "LAYERSMITH_GPU_MIN_FREE_GB overrides the check.")
 
                 self._set_status(build_id, "pulling")
                 digest = self.backend.resolve_base(build.base_image, build.architecture,

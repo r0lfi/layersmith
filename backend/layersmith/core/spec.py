@@ -108,6 +108,10 @@ def image_ref(repository, version):
 
 
 def export_filename(repository, version):
+    # localhost/ only names the local store, as Podman does: localhost/gpu-benchmark
+    # 1.0.0 is saved as gpu-benchmark-1.0.0.tar.
+    if repository.startswith("localhost/"):
+        repository = repository[len("localhost/"):]
     return f"{repository.replace('/', '-')}-{version}.tar"
 
 

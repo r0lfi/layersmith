@@ -95,10 +95,12 @@ and shows you the Containerfile it produced before anything is built.
   and CPU dataset preparation. Hash-locked Python stacks, checks run inside the
   image after each build (dependencies, CPU smoke test, offline example), and
   a Getting started for the exact image. See [docs/training.md](docs/training.md).
-- **NVIDIA GPU Benchmark Toolkit** — build a CUDA/PyTorch image with selectable
-  vLLM, CUDA compute, memory, and NCCL tests. Run local-model token benchmarks,
-  compare JSON/CSV/HTML reports, and export the image for offline GPU hosts.
-  See [docs/gpu-benchmark.md](docs/gpu-benchmark.md).
+- **NVIDIA GPU & LLM Benchmark** — a Quick build that produces one offline
+  Podman image with an interactive terminal dashboard: live GPU status, LLM
+  token speed and latency with vLLM on local models, GEMM compute, memory
+  bandwidth, NCCL multi-GPU and multi-node (torchrun, MPI, Slurm) tests, and
+  HTML/JSON/CSV reports with run comparisons. Download it as one `.tar`,
+  `podman load` it on the GPU server. See [docs/gpu-benchmark.md](docs/gpu-benchmark.md).
 - **Podman or Docker** as the build backend.
 - **Terminal client** — `layersmith` on any machine with Python 3.9+: an
   interactive TUI (projects, wizards, live logs, scans, exports) and a CLI
@@ -169,20 +171,25 @@ result works before it leaves the connected side. Choose
 Profiles, versions, measured image sizes and the offline workflow:
 [docs/training.md](docs/training.md).
 
-## NVIDIA GPU benchmark images
+## NVIDIA GPU & LLM Benchmark
 
-The **Create image → AI / ML / GPU** category builds a versioned
-**NVIDIA GPU Benchmark Toolkit** image using LayerSmith's regular build,
-logging, export, and publish functions. Configure CUDA, Python, benchmark
-groups, internal mirrors, and the image tag in the GUI. Its `gpu-bench` CLI
-measures local-model vLLM inference throughput, CUDA compute and memory copies,
-and NCCL collectives across multiple GPUs or a configured cluster. Runtime
-models stay on the host-mounted `/models` volume and are not downloaded.
+**Dashboard → Quick build → NVIDIA GPU & LLM Benchmark** opens a wizard for a
+versioned benchmark image (CUDA 13.0 + PyTorch 2.11 + vLLM 0.26 by default,
+for Hopper and Blackwell GPUs). The finished build offers **Download Podman
+Image (.tar)** with its SHA-256. On the GPU server:
 
-The image contains CUDA user-space libraries, not a kernel driver. Use the host
-NVIDIA driver and Docker NVIDIA Container Toolkit or Podman NVIDIA CDI. Read the
-[GPU benchmark guide](docs/gpu-benchmark.md) for AlmaLinux/RHEL runtime,
-SELinux, RDMA, Slurm, report, and air-gap instructions.
+```sh
+podman load -i gpu-benchmark-1.0.0.tar
+podman run --rm -it --device nvidia.com/gpu=all --security-opt=label=disable --shm-size=16g \
+  -v /models:/models:ro -v /opt/gpu-results:/results localhost/gpu-benchmark:1.0.0
+```
+
+The terminal dashboard starts and runs every benchmark against the GPUs and
+local models in front of it, with no network access. The same `gpu-bench`
+CLI drives scripted and Slurm runs. The image has CUDA user space only; the
+host provides the NVIDIA driver and Container Toolkit (CDI). The
+[guide](docs/gpu-benchmark.md) covers metrics, the version matrix, RDMA/RoCE,
+NCCL settings, Slurm and comparisons.
 
 ## Terminal client
 
@@ -225,8 +232,8 @@ carries the wheel and an offline archive with every dependency for Python
 3.9-3.13; it is not on PyPI. On the client machine:
 
 ```bash
-curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.5.0/layersmith-client-0.5.0-offline.tar.gz
-tar -xzf layersmith-client-0.5.0-offline.tar.gz && cd layersmith-client-0.5.0-offline
+curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.6.0/layersmith-client-0.6.0-offline.tar.gz
+tar -xzf layersmith-client-0.6.0-offline.tar.gz && cd layersmith-client-0.6.0-offline
 sha256sum -c SHA256SUMS
 pipx install --pip-args="--no-index --find-links=$PWD/wheelhouse" layersmith-client
 layersmith config set server https://layersmith.example.org
@@ -249,7 +256,7 @@ The documentation keeps these apart, and so should you:
 
 | Tag | Meaning |
 | --- | --- |
-| `0.5.0` | an exact release — **recommended for production** |
+| `0.6.0` | an exact release — **recommended for production** |
 | `0.2`, `0` | newest patch within that minor/major line |
 | `latest` | newest stable release |
 | `edge` | built from `main` on every merge; development, not stable |
@@ -257,7 +264,7 @@ The documentation keeps these apart, and so should you:
 ```yaml
 services:
   layersmith:
-    image: ghcr.io/r0lfi/layersmith:0.5.0
+    image: ghcr.io/r0lfi/layersmith:0.6.0
 ```
 
 Prereleases (`v0.2.0-rc1`) publish only their exact tag; they never move

@@ -3,6 +3,18 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, formatBytes, formatWhen } from "../api";
 import { Banner, Card, Empty, Stat, StatusPill, isActive, useLoad, usePoll } from "../components/ui";
 
+/** A GPU board: die, memory and edge connector. Inherits the text colour. */
+function GpuIcon() {
+  return (
+    <svg className="tile-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none"
+      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="5" width="19" height="12" rx="2" />
+      <rect x="7" y="8" width="6" height="6" rx="1" />
+      <path d="M15.5 8.5h3M15.5 11h3M15.5 13.5h3M5 17v2.5M8 17v2.5M11 17v2.5M14 17v2.5" />
+    </svg>
+  );
+}
+
 const QUICK_BUILD = ["Developer", "Linux Admin", "Network Tools", "Ansible", "Kubernetes", "Minimal"];
 
 export default function Dashboard() {
@@ -45,6 +57,13 @@ export default function Dashboard() {
               <div className="tile-sub">Start from this template</div>
             </button>
           ))}
+          <button className="tile tile-gpu" onClick={() => navigate("/projects/new?category=gpu-benchmark")}>
+            <div className="tile-title tile-title-icon"><GpuIcon /> NVIDIA GPU &amp; LLM Benchmark</div>
+            <div className="tile-sub">
+              Benchmark NVIDIA GPUs and AI models. Measure token speed, inference latency, GPU compute,
+              memory bandwidth and multi-GPU performance.
+            </div>
+          </button>
           <button className="tile" onClick={() => navigate("/projects/new?category=llm-training")}>
             <div className="tile-title">LLM Training &amp; Fine-tuning</div>
             <div className="tile-sub">LoRA/QLoRA, full fine-tuning, LLaMA-Factory, data preparation</div>

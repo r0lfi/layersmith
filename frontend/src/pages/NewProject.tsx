@@ -66,8 +66,8 @@ const CATEGORIES = [
   { id: "general", name: "General purpose", description: "Shells, admin, network, development and cluster tools" },
   { id: "llm-training", name: "LLM Training & Fine-tuning",
     description: "Ready-to-run environments for fine-tuning and training language models" },
-  { id: "gpu-benchmark", name: "AI / ML / GPU",
-    description: "Build NVIDIA CUDA, vLLM, memory and multi-node NCCL benchmark images" },
+  { id: "gpu-benchmark", name: "NVIDIA GPU & LLM Benchmark",
+    description: "Token speed, latency, GPU compute, memory bandwidth and multi-GPU/NCCL in one offline Podman image" },
 ];
 
 export default function NewProject() {

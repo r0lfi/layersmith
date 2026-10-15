@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "httpx>=0.27"]
+dev = ["pytest>=8.0", "httpx>=0.27", "textual>=8.2,<9"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -24,7 +24,7 @@ include = ["layersmith*"]
 # Lock files and the files copied into training images are data, not modules.
 [tool.setuptools.package-data]
 "layersmith.training" = ["stacks/*/*", "assets/**/*"]
-"layersmith.gpu_benchmark" = ["runtime/*.py", "runtime/**/*.py", "runtime/bin/*"]
+"layersmith.gpu_benchmark" = ["runtime/*.py", "runtime/**/*.py", "runtime/tui/*.tcss", "runtime/bin/*", "runtime/scripts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -278,11 +278,14 @@ export interface Spec {
   gpu_benchmark?: GpuBenchmarkRequest;
 }
 
+export type GpuBenchmarkMirrorKey = "apt_main" | "apt_security" | "pypi_index" | "torch_index" | "python_mirror"
+  | "nccl_tests_repository" | "nvbandwidth_repository";
+
 export interface GpuBenchmarkRequest {
   cuda_version: string;
   python_version: string;
   tools: string[];
-  mirrors?: Partial<Record<"apt_main" | "apt_security" | "pypi_index" | "torch_index" | "python_mirror" | "cuda_samples_repository" | "nccl_tests_repository", string>>;
+  mirrors?: Partial<Record<GpuBenchmarkMirrorKey, string>>;
 }
 
 export interface GpuBenchmarkRecipe extends GpuBenchmarkRequest {
@@ -292,27 +295,50 @@ export interface GpuBenchmarkRecipe extends GpuBenchmarkRequest {
   vllm?: string | null;
   transformers?: string | null;
   tokenizers?: string | null;
+  textual: string;
   nccl_tests: string;
+  nvbandwidth: string;
+  driver_minimum: string;
+  gpu_architectures: number[];
+  estimated_size_gb: number;
   mirrors: Record<string, string>;
+}
+
+export interface GpuBenchmarkStorage {
+  estimated_image_gb: number;
+  required_free_gb: number;
+  free_gb: number | null;
+  path: string;
+  enough: boolean | null;
 }
 
 export interface GpuBenchmarkCatalog {
   category: { id: string; name: string; intro: string; template: string; description: string };
-  cuda_variants: Record<string, { base: string; torch: string; vllm?: string | null }>;
+  cuda_variants: Record<string, { base: string; torch: string; vllm?: string | null; driver_minimum: string; label: string }>;
   python_versions: Record<string, string>;
   tool_groups: Record<string, string>;
-  defaults: GpuBenchmarkRequest;
+  core_components: Record<string, string>;
+  compatibility: { cuda_version: string; base: string; driver_minimum: string; torch: string; vllm: string | null;
+    label: string; gpu_architectures: string[] }[];
+  pins: Record<string, string>;
+  storage: GpuBenchmarkStorage;
+  defaults: GpuBenchmarkRequest & { name: string; repository: string; tag: string };
 }
 
 export interface GpuBenchmarkGettingStarted {
   title: string;
   summary: string;
   image: string;
+  archive: string;
   cuda: string;
   python: string;
   tools: string[];
+  driver_minimum: string;
+  check_host: string;
+  load: string;
+  verify: string;
   podman: string;
-  docker: string;
+  batch_example: string;
   commands: string[];
   notes: string[];
 }
@@ -321,6 +347,8 @@ export interface GpuBenchmarkDetail {
   recipe: GpuBenchmarkRecipe;
   getting_started: GpuBenchmarkGettingStarted;
   readme: string;
+  export: { archive: string; format: string; built_with: string; size: number | null; sha256: string | null;
+    available: boolean; status: string };
 }
 
 export interface GpuBenchmarkResolve {
@@ -328,6 +356,7 @@ export interface GpuBenchmarkResolve {
   error?: string;
   recipe?: GpuBenchmarkRecipe;
   getting_started?: GpuBenchmarkGettingStarted;
+  storage?: GpuBenchmarkStorage;
 }
 
 export interface Catalog {
@@ -443,7 +472,7 @@ export const api = {
     }),
   airgap: (buildId: string) =>
     request<{ filename: string; size: number; sha256: string }>(`/builds/${buildId}/airgap`, { method: "POST" }),
-  downloadUrl: (buildId: string, kind: "export" | "airgap") => `/api/builds/${buildId}/download/${kind}`,
+  downloadUrl: (buildId: string, kind: "export" | "airgap" | "export.sha256") => `/api/builds/${buildId}/download/${kind}`,
 
   scans: (buildId: string) => request<Scan[]>(`/builds/${buildId}/scans`),
   startScan: (buildId: string) => request<Scan>(`/builds/${buildId}/scan`, { method: "POST", body: "{}" }),

@@ -1,0 +1,3 @@
+# OpenMPI hostfile for gpu-bench nccl --hostfile (one line per node).
+node1 slots=8
+node2 slots=8

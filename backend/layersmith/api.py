@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import (
     APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -171,13 +171,26 @@ def _training_detail(build: Build, scanned: bool = False) -> dict | None:
     }
 
 
-def _gpu_benchmark_detail(build: Build) -> dict | None:
+def _gpu_benchmark_detail(build: Build, backend: str = "podman") -> dict | None:
     recipe = gpu_benchmark_recipe(build.spec)
     if recipe is None:
         return None
-    return {"recipe": recipe,
-            "getting_started": gpu_benchmark_render.getting_started(recipe, build.image_ref or "IMAGE"),
-            "readme": gpu_benchmark_render.markdown(recipe, build.image_ref or "IMAGE")}
+    image = build.image_ref or "IMAGE"
+    started = gpu_benchmark_render.getting_started(recipe, image)
+    archive = Path(build.export_path).name if build.export_path else started["archive"]
+    started["archive"] = archive
+    started["load"] = f"podman load -i {archive}\npodman images | grep gpu-benchmark"
+    started["verify"] = f"sha256sum -c {archive}.sha256"
+    return {"recipe": recipe, "getting_started": started,
+            "readme": gpu_benchmark_render.markdown(recipe, image),
+            "export": {"archive": archive, "format": "OCI archive (podman save --format oci-archive)"
+                       if backend == "podman" else "Docker archive with OCI layout (docker save); podman load reads it",
+                       "built_with": backend, "size": build.export_size, "sha256": build.export_sha256,
+                       "available": _downloadable(build.export_path),
+                       "status": ("exported" if _downloadable(build.export_path) else
+                                  "exporting" if build.status == "exporting" else
+                                  "missing" if build.status == "ready" else build.status)}}
+
 
 
 def _downloadable(path_value: str | None) -> bool:
@@ -570,7 +583,7 @@ def get_build(build_id: str, state=Depends(get_state)):
         return {**_build_json(build, project), "containerfile": build.containerfile, "log": log,
                 "manifest": manifest_for(project, build, build.export_sha256),
                 "training": _training_detail(build, scanned=_has_completed_scan(session, build.id)),
-                "gpu_benchmark": _gpu_benchmark_detail(build)}
+                "gpu_benchmark": _gpu_benchmark_detail(build, state["build_service"].backend.name)}
 
 
 @router.get("/builds/{build_id}/log")
@@ -680,12 +693,19 @@ def training_resolve(payload: TrainingResolveIn):
 
 @router.get("/gpu-benchmark/catalog")
 def gpu_benchmark_catalog_view():
+    from layersmith.services.builds import gpu_benchmark_storage
+
     return {"category": gpu_benchmark_catalog.CATEGORY,
             "cuda_variants": gpu_benchmark_catalog.CUDA_VARIANTS,
             "python_versions": gpu_benchmark_catalog.PYTHON_VERSIONS,
             "tool_groups": gpu_benchmark_catalog.TOOL_GROUPS,
+            "core_components": gpu_benchmark_catalog.CORE_COMPONENTS,
+            "compatibility": gpu_benchmark_catalog.compatibility_matrix(),
+            "pins": gpu_benchmark_catalog.PINS,
+            "storage": gpu_benchmark_storage(),
             "defaults": {"cuda_version": "13.0.2", "python_version": "3.12",
-                         "tools": gpu_benchmark_catalog.DEFAULT_TOOLS}}
+                         "tools": gpu_benchmark_catalog.DEFAULT_TOOLS, "name": "gpu-benchmark",
+                         "repository": "localhost/gpu-benchmark", "tag": "1.0.0"}}
 
 
 @router.post("/gpu-benchmark/resolve")
@@ -694,8 +714,11 @@ def gpu_benchmark_resolve(payload: GpuBenchmarkResolveIn):
         recipe = gpu_benchmark_catalog.resolve(payload.gpu_benchmark)
     except gpu_benchmark_catalog.RecipeError as exc:
         return {"ok": False, "error": str(exc)}
+    from layersmith.services.builds import gpu_benchmark_storage
+
     return {"ok": True, "recipe": recipe,
-            "getting_started": gpu_benchmark_render.getting_started(recipe, "IMAGE")}
+            "getting_started": gpu_benchmark_render.getting_started(recipe, "localhost/gpu-benchmark:1.0.0"),
+            "storage": gpu_benchmark_storage(recipe)}
 
 
 @router.post("/builds/{build_id}/airgap", status_code=201)
@@ -709,15 +732,21 @@ def create_airgap(build_id: str, state=Depends(get_state)):
 
 @router.get("/builds/{build_id}/download/{kind}")
 def download(build_id: str, kind: str, state=Depends(get_state)):
-    if kind not in ("export", "airgap"):
+    if kind not in ("export", "airgap", "export.sha256"):
         raise HTTPException(404, "Unknown download")
     with state["session_factory"]() as session:
         build = session.get(Build, build_id)
         if build is None:
             raise HTTPException(404, "Build not found")
         settings = config.settings()
-        path = _safe_download(build.export_path if kind == "export" else build.airgap_path,
+        path = _safe_download(build.airgap_path if kind == "airgap" else build.export_path,
                               [settings.image_dir, *storage.previous_image_dirs(session)])
+        if kind == "export.sha256":
+            # For `sha256sum -c` next to the downloaded archive.
+            if not build.export_sha256:
+                raise HTTPException(404, "No checksum recorded for this export")
+            return Response(f"{build.export_sha256}  {path.name}\n", media_type="text/plain",
+                            headers={"Content-Disposition": f'attachment; filename="{path.name}.sha256"'})
         return FileResponse(path, filename=path.name, media_type="application/octet-stream")
 
 

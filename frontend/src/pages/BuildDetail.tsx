@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, buildLogSocket, formatBytes, formatDuration, formatWhen } from "../api";
+import { api, Build, buildLogSocket, formatBytes, formatDuration, formatWhen } from "../api";
 import { Banner, Card, StatusPill, isActive, useLoad } from "../components/ui";
 import { SecurityPanel } from "../components/Security";
 import { TrainingPanel } from "../components/Training";
@@ -16,6 +16,70 @@ function LogLine({ line }: { line: string }) {
     ? "cmd"
     : undefined;
   return <div className={className}>{line || " "}</div>;
+}
+
+function GpuBenchmarkPanel({ build }: { build: Build }) {
+  const detail = build.gpu_benchmark!;
+  const started = detail.getting_started;
+  const exported = detail.export;
+  const [name, tag] = splitRef(build.image_ref ?? started.image);
+  return (
+    <div style={{ marginTop: "1rem" }}>
+      <Card title="NVIDIA GPU & LLM Benchmark">
+        <p className="faint" style={{ marginTop: 0 }}>{started.summary}</p>
+        <div className="grid two">
+          <div>
+            <dl className="kv">
+              <dt>Image name</dt><dd className="mono">{name}</dd>
+              <dt>Image tag</dt><dd className="mono">{tag}</dd>
+              <dt>Image ID</dt><dd className="mono truncate" title={build.image_id ?? ""}>{build.image_id ?? "—"}</dd>
+              <dt>Digest</dt><dd className="mono truncate" title={build.image_digest ?? ""}>{build.image_digest ?? "— (local image, not pushed)"}</dd>
+              <dt>File</dt><dd className="mono">{exported.archive}</dd>
+              <dt>File size</dt><dd>{formatBytes(exported.size)}</dd>
+              <dt>SHA-256</dt><dd className="mono" style={{ wordBreak: "break-all" }}>{exported.sha256 ?? "—"}</dd>
+              <dt>Format</dt><dd>{exported.format}</dd>
+              <dt>Export status</dt><dd>{exported.status}</dd>
+              <dt>Versions</dt><dd className="faint">
+                CUDA {detail.recipe.cuda_version} · Python {detail.recipe.python_full_version} · PyTorch {detail.recipe.torch}
+                {detail.recipe.vllm ? ` · vLLM ${detail.recipe.vllm}` : " · no vLLM"} · driver ≥ {detail.recipe.driver_minimum}
+              </dd>
+            </dl>
+            <div className="row" style={{ marginTop: "1rem", gap: "0.5rem", flexWrap: "wrap" }}>
+              {exported.available ? (
+                <>
+                  <a className="button primary" href={api.downloadUrl(build.id, "export")}>
+                    Download Podman Image (.tar) · {formatBytes(exported.size)}
+                  </a>
+                  <a className="button" href={api.downloadUrl(build.id, "export.sha256")}>SHA-256 file</a>
+                </>
+              ) : (
+                <span className="faint">
+                  {build.status === "ready" ? "The exported archive is no longer on disk." : "Available when the build is ready."}
+                </span>
+              )}
+            </div>
+          </div>
+          <div>
+            <h3 style={{ marginTop: 0 }}>1. Check the GPU server</h3>
+            <pre className="code">{started.check_host}</pre>
+            <h3>2. Verify and load (works offline)</h3>
+            <pre className="code">{`${started.verify}\n${started.load}`}</pre>
+            <h3>3. Start the benchmark dashboard</h3>
+            <pre className="code">{started.podman}</pre>
+          </div>
+        </div>
+        <h3>Scripted runs (CLI, Slurm)</h3>
+        <pre className="code">{started.batch_example}</pre>
+        <pre className="code">{started.commands.join("\n")}</pre>
+        <ul className="faint">{started.notes.map((note) => <li key={note}>{note}</li>)}</ul>
+      </Card>
+    </div>
+  );
+}
+
+function splitRef(reference: string): [string, string] {
+  const index = reference.lastIndexOf(":");
+  return index > 0 ? [reference.slice(0, index), reference.slice(index + 1)] : [reference, "latest"];
 }
 
 export default function BuildDetail() {
@@ -168,26 +232,7 @@ export default function BuildDetail() {
         />
       )}
 
-      {build.gpu_benchmark && (
-        <div style={{ marginTop: "1rem" }}>
-          <Card title="NVIDIA GPU Benchmark Toolkit">
-            <p className="faint">{build.gpu_benchmark.getting_started.summary}</p>
-            <p className="mono faint">
-              CUDA {build.gpu_benchmark.recipe.cuda_version} · Python {build.gpu_benchmark.recipe.python_full_version}
-              {` · PyTorch ${build.gpu_benchmark.recipe.torch}`}
-              {build.gpu_benchmark.recipe.vllm ? ` · vLLM ${build.gpu_benchmark.recipe.vllm}` : " · vLLM not installed"}
-              {` · ${build.gpu_benchmark.recipe.tools.join(", ")}`}
-            </p>
-            <div className="grid two">
-              <div><h3>Podman</h3><pre className="code">{build.gpu_benchmark.getting_started.podman}</pre></div>
-              <div><h3>Docker</h3><pre className="code">{build.gpu_benchmark.getting_started.docker}</pre></div>
-            </div>
-            <h3>Commands</h3>
-            <pre className="code">{build.gpu_benchmark.getting_started.commands.join("\n")}</pre>
-            <p className="faint">{build.gpu_benchmark.getting_started.notes.join(" ")}</p>
-          </Card>
-        </div>
-      )}
+      {build.gpu_benchmark && <GpuBenchmarkPanel build={build} />}
 
       {build.status === "ready" && (
         <SecurityPanel
