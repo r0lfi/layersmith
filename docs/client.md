@@ -73,7 +73,7 @@ It is not published on PyPI. Download the file you need, or copy it to a
 client machine without internet access:
 
 ```bash
-curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.8.0/layersmith-client-0.8.0-offline.tar.gz
+curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.8.1/layersmith-client-0.8.1-offline.tar.gz
 ```
 
 With network access to PyPI, from the wheel:
@@ -166,7 +166,7 @@ layersmith          # or: layersmith tui
 ```
    ▄▄▄▄▄    LayerSmith                               Server https://layersmith.example.org
  ▄▄▄▄▄▄▄▄▄  Build container images with purpose                             ● Connected
-▄▄▄▄▄▄▄▄▄▄▄ by xnett.org                          client 0.8.0  ·  server 0.8.0
+▄▄▄▄▄▄▄▄▄▄▄ by xnett.org                          client 0.8.1  ·  server 0.8.1
 ─────────────────────────────────────────────────────────────────────────────────────────
 ╭────────────────────────╮ ╭ Projects 4 projects ─────────────────╮ ╭ Project details ──────────╮
 │  Dashboard             │ │ Name        Template  Latest Status  │ │ net-tools                 │
@@ -584,7 +584,7 @@ The client lives in `client/` of this repository, as its own package
 package. To build the release files:
 
 ```bash
-client/scripts/build-release.sh 0.8.0            # writes client/dist/
+client/scripts/build-release.sh 0.8.1            # writes client/dist/
 ```
 
 This needs Python with pip, `uv` (to resolve dependencies per Python
