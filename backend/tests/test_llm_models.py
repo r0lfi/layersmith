@@ -520,3 +520,19 @@ def test_models_chosen_in_the_wizard_are_suggested_in_the_kit(client, hub, monke
     client.state["model_service"].run(model_id)
     after = client.get(f"/api/builds/{build_id}/kit").json()
     assert after["suggested"] == [model_id] and after["pending"] == []
+
+
+def test_a_gpu_benchmark_build_is_split_for_the_kit_right_away(client, hub, monkeypatch):
+    monkeypatch.setenv("LAYERSMITH_GPU_MIN_FREE_GB", "0")
+    started = []
+    monkeypatch.setattr(client.state["split_service"], "start", started.append)
+    project = client.post("/api/projects", json={"name": "gpu-benchmark", "repository": "localhost/gpu-benchmark",
+                                                 "template": "NVIDIA GPU & LLM Benchmark",
+                                                 "spec": {"gpu_benchmark": {}}}).json()
+    gpu = client.post(f"/api/projects/{project['id']}/builds", json={}).json()["id"]
+    run_pending_build(client, gpu)
+    plain = client.post("/api/projects", json={"name": "plain", "template": "Minimal",
+                                               "spec": {"base": {"distribution": "Alpine", "version": "3.22"}}}).json()
+    other = client.post(f"/api/projects/{plain['id']}/builds", json={}).json()["id"]
+    run_pending_build(client, other)
+    assert started == [gpu]

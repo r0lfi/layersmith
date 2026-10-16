@@ -1136,7 +1136,22 @@ def create_app(settings=None) -> FastAPI:
     scan_service = ScanService(session_factory, backend, scanner, settings=settings, log_bus=service.logs)
     # Scanning is bolted on here rather than inside the build pipeline, so a
     # build neither waits for a scan nor knows a scanner exists.
-    service.on_built = scan_service.after_build
+    split_service = splitting.SplitService(session_factory, settings=settings)
+
+    def after_build(build_id: str) -> None:
+        scan_service.after_build(build_id)
+        # A GPU benchmark image is meant for the GPU kit: split it right away,
+        # so the kit is complete when the build is.
+        with session_factory() as session:
+            build = session.get(Build, build_id)
+            gpu = build is not None and gpu_benchmark_recipe(build.spec) is not None
+        if gpu:
+            try:
+                split_service.start(build_id)
+            except splitting.SplitError:
+                pass  # the kit offers "Prepare image parts" instead
+
+    service.on_built = after_build
     service.security_artifacts = scan_service.write_artifacts
     # Temporary scan exports are removed as each scan ends; this clears any
     # left behind by a crash or a kill.
@@ -1147,7 +1162,7 @@ def create_app(settings=None) -> FastAPI:
                   description=f"{config.TAGLINE} by xnett.org")
     app.state.layersmith = {"session_factory": session_factory, "build_service": service,
                             "scan_service": scan_service, "settings": settings,
-                            "split_service": splitting.SplitService(session_factory, settings=settings),
+                            "split_service": split_service,
                             "model_service": model_service}
     # Unfinished model downloads continue where they stopped.
     model_service.recover()
