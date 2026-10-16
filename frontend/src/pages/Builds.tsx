@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Build, formatBytes, formatDuration, formatWhen } from "../api";
+import { api, formatBytes, formatDuration, formatWhen } from "../api";
+import { DeleteBuildButton } from "../components/DeleteBuild";
 import { Banner, Card, Empty, StatusPill, isActive, useLoad, usePoll } from "../components/ui";
 
 export default function Builds() {
@@ -8,30 +9,11 @@ export default function Builds() {
   const { data, error, loading, reload } = useLoad(() => api.builds(100));
   const refresh = useCallback(() => reload(), [reload]);
   usePoll(refresh, Boolean(data?.some((build) => isActive(build.status))));
-  const [deleting, setDeleting] = useState<string | null>(null);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
-
-  async function remove(build: Build) {
-    const archive = build.export_size ? ` its ${formatBytes(build.export_size)} archive,` : "";
-    const confirmed = window.confirm(
-      `Delete build #${build.number} (${build.project_name ?? "project"} ${build.version})?\n\n` +
-      `This removes the build record,${archive} its air-gap bundle, log and scan results, and the image ` +
-      `${build.image_ref ?? ""} from the local image store. Files and images another build still uses are kept.\n\n` +
-      "This cannot be undone.");
-    if (!confirmed) return;
-    setDeleting(build.id);
-    setMessage(null);
-    try {
-      const result = await api.deleteBuild(build.id);
-      const freed = result.freed_bytes ? `, ${formatBytes(result.freed_bytes)} freed` : "";
-      setMessage({ error: false, text: `Build #${result.number} deleted${freed}.${result.notes.length ? " " + result.notes.join(". ") + "." : ""}` });
-      reload();
-    } catch (exc) {
-      setMessage({ error: true, text: (exc as Error).message });
-    } finally {
-      setDeleting(null);
-    }
-  }
+  const done = (result: { error: boolean; text: string }) => {
+    setMessage(result);
+    if (!result.error) reload();
+  };
 
   if (error) return <Banner>{error}</Banner>;
   if (loading && !data) return <p className="dim">Loading…</p>;
@@ -78,19 +60,7 @@ export default function Builds() {
                   <td data-label="Duration">{formatDuration(build.duration_seconds)}</td>
                   <td data-label="Size">{formatBytes(build.image_size)}</td>
                   <td data-label="Status"><StatusPill status={build.status} /></td>
-                  <td>
-                    <button
-                      className="danger"
-                      disabled={isActive(build.status) || deleting !== null}
-                      title={isActive(build.status) ? "A running build cannot be deleted" : `Delete build #${build.number}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        remove(build);
-                      }}
-                    >
-                      {deleting === build.id ? "Deleting…" : "Delete"}
-                    </button>
-                  </td>
+                  <td><DeleteBuildButton build={build} onDone={done} /></td>
                 </tr>
               ))}
             </tbody>

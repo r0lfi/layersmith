@@ -496,3 +496,27 @@ def test_download_all_fetches_and_verifies(client, hub, monkeypatch, tmp_path):
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+def test_models_chosen_in_the_wizard_are_suggested_in_the_kit(client, hub, monkeypatch):
+    from layersmith.llm import catalog as llm_catalog
+
+    monkeypatch.setitem(llm_catalog.BY_KEY, "tiny", {"key": "tiny", "repo_id": "Org/Tiny-Model"})
+    monkeypatch.setenv("LAYERSMITH_GPU_MIN_FREE_GB", "0")
+    bad = client.post("/api/projects", json={"name": "gpu-x", "template": "NVIDIA GPU & LLM Benchmark",
+                                             "spec": {"gpu_benchmark": {"models": ["nope"]}}})
+    assert bad.status_code == 422 and "Unknown model" in bad.json()["detail"]
+    project = client.post("/api/projects", json={"name": "gpu-benchmark", "repository": "localhost/gpu-benchmark",
+                                                 "template": "NVIDIA GPU & LLM Benchmark",
+                                                 "spec": {"gpu_benchmark": {"models": ["tiny", "tiny"]}}}).json()
+    assert project["spec"]["gpu_benchmark"]["models"] == ["tiny"]
+    build_id = client.post(f"/api/projects/{project['id']}/builds", json={}).json()["id"]
+    run_pending_build(client, build_id)
+    before = client.get(f"/api/builds/{build_id}/kit").json()
+    assert before["suggested"] == [] and before["pending"] == [
+        {"key": "tiny", "name": "Org/Tiny-Model", "status": "not downloaded"}]
+    model_id = client.post("/api/llm-models", json={"repo_id": "Org/Tiny-Model", "catalog_key": "tiny"}).json()["id"]
+    assert client.get(f"/api/builds/{build_id}/kit").json()["pending"][0]["status"] == "queued"
+    client.state["model_service"].run(model_id)
+    after = client.get(f"/api/builds/{build_id}/kit").json()
+    assert after["suggested"] == [model_id] and after["pending"] == []

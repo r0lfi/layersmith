@@ -55,7 +55,9 @@ a container's file system). A LayerSmith server that builds with Docker writes
 When files over 1 GB cannot be moved, or you want models along, use the
 **GPU kit** on the build page instead of steps 2-4:
 
-1. Download models on the **Models** page (see [models.md](models.md)).
+1. Tick models in the wizard's **LLM models** card (downloads start when you
+   press Build and run alongside it), or download them on the **Models** page
+   (see [models.md](models.md)).
 2. On the build page, tick the models, press **Prepare image parts**, then
    download **download-all.sh** and run it where LayerSmith is reachable:
    `mkdir gpu-kit && cd gpu-kit && bash ~/Downloads/download-all.sh`. It

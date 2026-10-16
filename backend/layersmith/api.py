@@ -1031,11 +1031,19 @@ def _kit(build_id: str, model_ids: str, state) -> dict:
         for name, text in (("setup.sh", setup_text), ("start_container.sh", start_text)):
             files.append({"name": name, "kind": "script", "size": len(text.encode()),
                           "url": f"/api/builds/{build.id}/kit/{name}{query}", "_text": text})
+        # Models picked in the wizard: ticked by default once downloaded.
+        planned = ((build.spec or {}).get("gpu_benchmark") or {}).get("models") or []
+        local = {m.catalog_key: m for m in session.scalars(select(LlmModel).where(LlmModel.catalog_key.in_(planned)))}
+        suggested = [local[key].id for key in planned if key in local and local[key].status == "ready"]
+        pending = [{"key": key, "name": local[key].name if key in local else llm_catalog.BY_KEY[key]["repo_id"],
+                    "status": local[key].status if key in local else "not downloaded"}
+                   for key in planned if key in llm_catalog.BY_KEY and not (key in local and local[key].status == "ready")]
         need = (build.export_size or 0) * 2 + (build.image_size or 0) + sum(
             sum(f["size"] for f in m.files) for m, _ in models)
         return {"build_id": build.id, "image": image_ref, "image_split": image["state"],
                 "image_split_progress": image.get("progress"), "models": [m.id for m, _ in models],
                 "problems": problems, "files": files, "query": query,
+                "suggested": suggested, "pending": pending,
                 "total_bytes": sum(int(f.get("size") or 0) for f in files),
                 "gpu_host_needs_bytes": need, "ready": bool(manifest) and not problems}
 

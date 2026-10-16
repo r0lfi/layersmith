@@ -11,6 +11,7 @@ export function GpuKit({ buildId }: { buildId: string }) {
   const [kit, setKit] = useState<Kit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFiles, setShowFiles] = useState(false);
+  const [preselected, setPreselected] = useState(false);
 
   useEffect(() => {
     api.llmModels().then((all) => setModels(all.filter((model) => model.status === "ready")))
@@ -18,10 +19,17 @@ export function GpuKit({ buildId }: { buildId: string }) {
   }, []);
 
   function load() {
-    api.gpuKit(buildId, chosen).then(setKit).catch((exc) => setError((exc as Error).message));
+    api.gpuKit(buildId, chosen).then((value) => {
+      setKit(value);
+      // Models picked in the wizard are ticked once, as soon as they are downloaded.
+      if (!preselected && value.suggested.length) {
+        setPreselected(true);
+        setChosen((current) => Array.from(new Set([...current, ...value.suggested])));
+      }
+    }).catch((exc) => setError((exc as Error).message));
   }
   useEffect(load, [buildId, chosen.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
-  usePoll(load, kit?.image_split === "running", 1500);
+  usePoll(load, kit?.image_split === "running" || Boolean(kit?.pending.some((p) => p.status !== "failed")), 3000);
 
   async function prepareImage() {
     setError(null);
@@ -64,6 +72,14 @@ export function GpuKit({ buildId }: { buildId: string }) {
               </label>
             ))}
           </div>
+        )}
+
+        {kit && kit.pending.length > 0 && (
+          <p className="faint">
+            Chosen for this image, not ready yet:{" "}
+            {kit.pending.map((item) => `${item.name} (${item.status})`).join(", ")}. They are ticked here when their
+            download finishes — see the <Link to="/models">Models page</Link>.
+          </p>
         )}
 
         <h3>2. Image parts</h3>

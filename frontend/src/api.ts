@@ -127,6 +127,8 @@ export interface GpuKit {
   total_bytes: number;
   gpu_host_needs_bytes: number;
   ready: boolean;
+  suggested: string[];
+  pending: { key: string; name: string; status: string }[];
 }
 
 /* ------------------------------------------------- LLM training profiles */
@@ -373,6 +375,8 @@ export interface GpuBenchmarkRequest {
   python_version: string;
   tools: string[];
   mirrors?: Partial<Record<GpuBenchmarkMirrorKey, string>>;
+  /** LLM catalogue keys to bring along in the GPU kit; not part of the image. */
+  models?: string[];
 }
 
 export interface GpuBenchmarkRecipe extends GpuBenchmarkRequest {

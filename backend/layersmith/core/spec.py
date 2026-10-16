@@ -260,6 +260,18 @@ def _apply_gpu_benchmark(spec):
     spec["gpu_benchmark"] = {"cuda_version": recipe["cuda_version"],
                              "python_version": recipe["python_version"], "tools": recipe["tools"],
                              "mirrors": recipe["mirrors"]}
+    # Models to bring along in the GPU kit (catalogue keys). Never part of the
+    # image: the Containerfile does not see them.
+    models = request.get("models") or []
+    if models:
+        from layersmith.llm import catalog as llm_catalog
+
+        if not isinstance(models, list) or len(models) > 20:
+            raise InvalidSpec("gpu_benchmark.models must be a list of at most 20 catalogue entries")
+        unknown = sorted({m for m in models if m not in llm_catalog.BY_KEY})
+        if unknown:
+            raise InvalidSpec("Unknown model: " + ", ".join(map(str, unknown)))
+        spec["gpu_benchmark"]["models"] = list(dict.fromkeys(models))
     if spec.get("architecture") not in (None, "amd64"):
         raise InvalidSpec("The NVIDIA GPU Benchmark Toolkit currently supports amd64 CUDA images only.")
     spec["architecture"] = "amd64"

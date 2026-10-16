@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, GpuBenchmarkCatalog, GpuBenchmarkMirrorKey, GpuBenchmarkRequest, GpuBenchmarkResolve } from "../api";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  api, formatDecimalBytes, GpuBenchmarkCatalog, GpuBenchmarkMirrorKey, GpuBenchmarkRequest, GpuBenchmarkResolve,
+  ModelCatalog,
+} from "../api";
 import { Banner, Card, Field } from "../components/ui";
 
 const TEMPLATE = "NVIDIA GPU & LLM Benchmark";
@@ -40,9 +43,13 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
   const [containerfile, setContainerfile] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
+  //: Catalogue keys to bring along in the GPU kit; the smoke test by default.
+  const [models, setModels] = useState<string[]>(["qwen2.5-0.5b-instruct"]);
 
   useEffect(() => {
     api.gpuBenchmarkCatalog().then(setCatalog, (exc: Error) => setError(exc.message));
+    api.llmCatalog().then(setModelCatalog, () => setModelCatalog(null));
   }, []);
 
   useEffect(() => {
@@ -56,7 +63,10 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
     return () => { cancelled = true; };
   }, [request]);
 
-  const spec = useMemo(() => ({ gpu_benchmark: request }), [request]);
+  const withLlm = request.tools.includes("llm");
+  const chosenModels = withLlm ? models : [];
+  const spec = useMemo(() => ({ gpu_benchmark: { ...request, models: chosenModels } }),
+    [request, chosenModels.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const imageRef = `${repository || name}:${tag}`;
   const archive = `${(repository || name).replace(/^localhost\//, "").replace(/\//g, "-")}-${tag}.tar`;
   const validImage = /^[a-z0-9][a-z0-9-]*$/.test(name)
@@ -85,6 +95,11 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
     setBusy(true);
     setError(null);
     try {
+      // Start the model downloads first, so they run while the image builds.
+      for (const key of chosenModels) {
+        const entry = modelCatalog?.models.find((item) => item.key === key);
+        if (entry && !entry.local) await api.requestModel({ repo_id: entry.repo_id, catalog_key: key });
+      }
       const project = await api.createProject({ name, description, repository, template: TEMPLATE, mode: "gui", spec });
       const result = await api.startBuild(project.id, tag);
       navigate(`/builds/${result.id}`);
@@ -184,8 +199,9 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
 
         <Card title="Image size">
           <p style={{ marginTop: 0 }}>
-            Estimated image: <strong>{recipe?.estimated_size_gb ?? storage.estimated_image_gb} GB</strong> uncompressed;
-            the exported <span className="mono">.tar</span> is about the same size.
+            Estimated image: <strong>{recipe?.estimated_size_gb ?? storage.estimated_image_gb} GB</strong> unpacked;
+            the exported <span className="mono">.tar</span> is about half of that (layers are stored compressed).
+            Loading it on the GPU host needs the unpacked size free in podman's image store.
           </p>
           <p className="faint">
             CUDA, PyTorch (with cuDNN, cuBLAS and NCCL) and vLLM make this a large image. That is the price of a fully
@@ -209,6 +225,66 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
           <p className="faint">Build time is typically 20–60 minutes: large downloads, and nccl-tests and nvbandwidth are compiled for every GPU generation.</p>
         </Card>
       </div>
+
+      {withLlm && modelCatalog && (
+        <div style={{ marginTop: "1rem" }}>
+          <Card title="LLM models for the token-speed tests">
+            <p className="faint" style={{ marginTop: 0 }}>
+              Models are not built into the image (it stays the same size); LayerSmith downloads the ones you tick
+              from Hugging Face while the image builds, and the build page's <strong>GPU kit</strong> hands them over
+              with the image in parts under 1 GB. <span className="mono">setup.sh</span> installs them into{" "}
+              <span className="mono">/opt/models</span> on the GPU host. More on the <Link to="/models">Models page</Link>.
+            </p>
+            <table className="table">
+              <tbody>
+                {modelCatalog.models.map((entry) => {
+                  const checked = models.includes(entry.key);
+                  return (
+                    <tr key={entry.key} onClick={() => setModels((current) => checked
+                      ? current.filter((key) => key !== entry.key) : [...current, entry.key])} style={{ cursor: "pointer" }}>
+                      <td data-label="Model">
+                        <label className="check" onClick={(event) => event.stopPropagation()}>
+                          <input type="checkbox" checked={checked} onChange={() => setModels((current) => checked
+                            ? current.filter((key) => key !== entry.key) : [...current, entry.key])} />
+                          <span>
+                            <span className="mono" style={{ overflowWrap: "anywhere" }}>{entry.repo_id}</span>
+                            <span className="faint" style={{ display: "block", fontSize: "0.8rem" }}>
+                              {modelCatalog.purposes[entry.purpose]} · {entry.why}
+                            </span>
+                          </span>
+                        </label>
+                      </td>
+                      <td data-label="Size">
+                        <div>
+                          <span>{entry.params} · {entry.precision}</span>
+                          <div className="faint" style={{ whiteSpace: "nowrap" }}>
+                            {entry.size_gb.toFixed(1)} GB · {entry.gpus} GPU{entry.gpus > 1 ? "s" : ""}
+                          </div>
+                        </div>
+                      </td>
+                      <td data-label="Status" className="faint" style={{ whiteSpace: "nowrap" }}>
+                        {entry.local ? (entry.local.status === "ready" ? "downloaded" : entry.local.status) : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {(() => {
+              const pending = modelCatalog.models.filter((entry) => models.includes(entry.key) && !entry.local);
+              const bytes = pending.reduce((sum, entry) => sum + entry.size_gb * 1e9, 0);
+              const short = modelCatalog.free_bytes !== null && bytes > modelCatalog.free_bytes;
+              return (
+                <p className={short ? "warning" : "faint"}>
+                  {models.length} selected · {formatDecimalBytes(bytes)} still to download
+                  {modelCatalog.free_bytes !== null && <> · {formatDecimalBytes(modelCatalog.free_bytes)} free for models</>}
+                  {short && " — not enough space: untick some, or give the model directory more room."}
+                </p>
+              );
+            })()}
+          </Card>
+        </div>
+      )}
 
       <details className="concepts" style={{ marginTop: "1rem" }}>
         <summary>Internal build mirrors (optional)</summary>
@@ -235,8 +311,9 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
         )}
         <p className="faint">
           After the build LayerSmith exports the image and offers it as <strong>Download Podman Image (.tar)</strong> with
-          its SHA-256. On the GPU server: <span className="mono">podman load -i {archive}</span>, then
-          <span className="mono"> podman run -it …</span> opens the dashboard.
+          its SHA-256, and as a <strong>GPU kit</strong> with the chosen models and <span className="mono">setup.sh</span>{" "}
+          in parts under 1 GB. On the GPU server: <span className="mono">bash setup.sh</span>, or{" "}
+          <span className="mono">podman load -i {archive}</span> and <span className="mono">podman run -it …</span>.
         </p>
         {containerfile ? <pre className="code">{containerfile}</pre> : <p className="dim">Preview the generated Containerfile before building.</p>}
         <div className="row" style={{ marginTop: "1rem" }}>

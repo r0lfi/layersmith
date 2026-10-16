@@ -13,6 +13,10 @@ those models onto a GPU host that has no network and may refuse files of
    `/opt/models/<model>` and checks every file again. The container sees it
    as `/models/<model>`.
 
+The GPU benchmark wizard has the same list as an **LLM models** card: the
+models ticked there start downloading when you press Build, and are ticked in
+the build's GPU kit as soon as they are ready.
+
 The **GPU kit** on a GPU benchmark build page bundles the image, the chosen
 models, `setup.sh` and `start_container.sh`, so the GPU host needs a single
 `bash setup.sh`; see [gpu-benchmark.md](gpu-benchmark.md#the-gpu-kit-one-command-on-the-gpu-host).
