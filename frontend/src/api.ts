@@ -11,6 +11,7 @@ export interface Build {
   number: number;
   project_id: string;
   project_name?: string | null;
+  project_deleted?: boolean;
   version: string;
   status: BuildStatus;
   reason: string;
@@ -493,6 +494,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(version ? { version } : {}),
     }),
+  deleteBuild: (buildId: string, removeImage = true) =>
+    request<{ deleted: string; number: number; freed_bytes: number; image_removed: boolean; notes: string[] }>(
+      `/builds/${buildId}?remove_image=${removeImage}`, { method: "DELETE" }),
   airgap: (buildId: string) =>
     request<{ filename: string; size: number; sha256: string }>(`/builds/${buildId}/airgap`, { method: "POST" }),
   downloadUrl: (buildId: string, kind: "export" | "airgap" | "export.sha256") => `/api/builds/${buildId}/download/${kind}`,
@@ -569,7 +573,9 @@ export function formatDuration(seconds?: number | null): string {
 
 export function formatWhen(value?: string | null): string {
   if (!value) return "-";
-  const date = new Date(value);
+  // The server stores UTC; SQLite returns it without an offset, and a bare
+  // ISO time would be read as local time ("2 h ago" for a fresh build at UTC+2).
+  const date = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value}Z`);
   const diff = (Date.now() - date.getTime()) / 1000;
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;

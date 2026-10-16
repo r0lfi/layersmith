@@ -23,7 +23,9 @@ from layersmith import config
 from layersmith.backends.base import BuildError
 from layersmith.core import containerfile as cf
 from layersmith.core.spec import export_filename, image_ref
-from layersmith.models import Build, Project, utcnow
+from sqlalchemy import select
+
+from layersmith.models import ACTIVE_STATES, Build, Project, utcnow
 
 MAX_LOG_BYTES = 32 * 1024 * 1024
 
@@ -402,6 +404,73 @@ class BuildService:
             # uploaded files and can be large.
             if not self.settings.keep_build_contexts:
                 shutil.rmtree(self.context_dir(build_id), ignore_errors=True)
+
+    # ------------------------------------------------------------ removal
+
+    def recover_interrupted(self) -> int:
+        """Fail builds a stop or restart left active; nothing will ever finish them.
+
+        Called once at startup, before the worker exists, so every active row
+        is an orphan. Without this a build interrupted by an upgrade showed
+        "building" forever and could never be deleted.
+        """
+        with self.session_factory() as session:
+            stale = session.scalars(select(Build).where(Build.status.in_(ACTIVE_STATES))).all()
+            for build in stale:
+                build.status, build.finished_at = "failed", utcnow()
+                build.error = "Interrupted: LayerSmith stopped while this build was running. Start the build again."
+            session.commit()
+            return len(stale)
+
+    def delete(self, build_id: str, allowed_dirs: list[Path], remove_image: bool = True) -> dict:
+        """Remove a finished build: its row, log, archives and (optionally) its image.
+
+        A file or image another remaining build still points at is kept: two
+        builds of the same name and version share both (a project deleted and
+        created again builds the same reference and archive name).
+        """
+        with self.session_factory() as session:
+            build = session.get(Build, build_id)
+            if build is None:
+                raise LookupError("Build not found")
+            if build.status in ACTIVE_STATES:
+                raise BuildError("This build is still running; wait for it to finish before deleting it")
+            others = session.scalars(select(Build).where(Build.id != build_id)).all()
+            shared_paths = {path for other in others for path in (other.export_path, other.airgap_path) if path}
+            shared_refs = {other.image_ref for other in others if other.image_ref}
+            roots = [Path(directory).resolve() for directory in allowed_dirs]
+            freed, notes = 0, []
+            for value in dict.fromkeys(path for path in (build.export_path, build.airgap_path) if path):
+                path = Path(value)
+                if value in shared_paths:
+                    notes.append(f"Kept {path.name}: another build uses the same file")
+                    continue
+                if not any(path.resolve().is_relative_to(root) for root in roots):
+                    notes.append(f"Kept {path.name}: it is outside the image directory")
+                    continue
+                try:
+                    size = path.stat().st_size
+                    path.unlink()
+                    freed += size
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    notes.append(f"Could not remove {path.name}: {exc.strerror or exc}")
+            self.log_path(build_id).unlink(missing_ok=True)
+            shutil.rmtree(self.context_dir(build_id), ignore_errors=True)
+
+            image_removed = False
+            if remove_image and build.image_ref:
+                if build.image_ref in shared_refs:
+                    notes.append(f"Kept the image {build.image_ref}: another build has the same name and version")
+                else:
+                    self.backend.remove(build.image_ref)
+                    image_removed = True
+            number = build.number
+            session.delete(build)
+            session.commit()
+        return {"deleted": build_id, "number": number, "freed_bytes": freed, "image_removed": image_removed,
+                "notes": notes}
 
     # --------------------------------------------------------- checks
 

@@ -82,6 +82,10 @@ and shows you the Containerfile it produced before anything is built.
   and each build records its Containerfile, base digest, package list, file
   checksums and log.
 - **Digest-pinned bases**, so a rebuild does not silently follow a moved tag.
+- **Delete builds** from the Builds list: the record, its archives, log, scan
+  results and local image go together; anything another build still uses is
+  kept. Running builds cannot be deleted, and a build a restart interrupted is
+  marked failed instead of showing as running forever.
 - **Live build logs**, streamed to the browser.
 - **OCI TAR export** with a recorded SHA256.
 - **Split archives** — the same TAR in parts under 1 GB plus a bash-only

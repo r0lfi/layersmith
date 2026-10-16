@@ -35,7 +35,7 @@ from sqlalchemy import select
 
 from layersmith import config
 from layersmith.backends.base import BuildError
-from layersmith.models import Build, Scan, ScanFinding, utcnow
+from layersmith.models import SCAN_ACTIVE_STATES, Build, Scan, ScanFinding, utcnow
 from layersmith.scanners import base as scanner_base
 from layersmith.scanners.base import ScannerError, ScannerUnavailable
 from layersmith.services.builds import readable_artifact, sha256_file
@@ -366,6 +366,21 @@ class ScanService:
             (directory / "SECURITY.txt").write_text(_security_text(scan, summary), encoding="utf-8")
 
     # ------------------------------------------------------------ removal
+
+    def delete_for_build(self, build_id: str) -> int:
+        """Remove every scan of a build, its findings and its files.
+
+        Raises ScanError while a scan of the build is still running.
+        """
+        with self.session_factory() as session:
+            scans = session.scalars(select(Scan).where(Scan.build_id == build_id)).all()
+            if any(scan.state in SCAN_ACTIVE_STATES for scan in scans):
+                raise ScanError("A scan of this build is still running; wait for it to finish before deleting it")
+            for scan in scans:
+                self.delete_artifacts(scan)
+                session.delete(scan)
+            session.commit()
+            return len(scans)
 
     def delete_artifacts(self, scan: Scan) -> None:
         """Remove a scan's report and SBOM from disk."""

@@ -32,8 +32,8 @@ from layersmith.core.spec import (
     validate_spec, version_key,
 )
 from layersmith.models import (
-    Blob, Build, Project, Scan, ScanFinding, create_all, make_engine, make_session_factory, next_build_number,
-    utcnow,
+    ACTIVE_STATES, Blob, Build, Project, Scan, ScanFinding, create_all, make_engine, make_session_factory,
+    next_build_number, utcnow,
 )
 from layersmith import scanners
 from layersmith.services import splitting, storage
@@ -59,7 +59,7 @@ LOG_CHUNK_MAX_BYTES = 1024 * 1024
 
 #: Optional API additions a client can check for instead of guessing from the
 #: version. Additive only: a client must keep working without any of them.
-API_FEATURES = ["log-offset", "limits", "split-archive"]
+API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build"]
 
 
 # ------------------------------------------------------------- schemas
@@ -136,7 +136,10 @@ def _project_json(project: Project, builds: list[Build] | None = None) -> dict:
 def _build_json(build: Build, project: Project | None = None) -> dict:
     return {
         "id": build.id, "number": build.number, "project_id": build.project_id,
-        "project_name": project.name if project else None,
+        # A deleted project's row keeps its builds but gave up its name
+        # (name~<id>, see _free_name); show the name it had.
+        "project_name": (project.name.split("~", 1)[0] if project else None),
+        "project_deleted": bool(project and project.deleted_at),
         "version": build.version, "status": build.status, "reason": build.reason, "error": build.error,
         "mode": build.mode, "architecture": build.architecture,
         "base_image": build.base_image, "base_digest": build.base_digest,
@@ -400,10 +403,10 @@ def stats(state=Depends(get_state)):
         images = session.scalar(select(func.count()).select_from(Build).where(Build.status == "ready"))
         stored = session.scalar(select(func.sum(Build.export_size)).where(Build.export_size.isnot(None))) or 0
         recent = session.scalars(select(Build).order_by(Build.number.desc()).limit(5)).all()
-        names = {p.id: p.name for p in session.scalars(select(Project)).all()}
+        owners = {p.id: p for p in session.scalars(select(Project)).all()}
         return {
             "projects": projects, "builds": builds, "images": images, "storage_bytes": int(stored),
-            "recent": [{**_build_json(b), "project_name": names.get(b.project_id)} for b in recent],
+            "recent": [_build_json(b, owners.get(b.project_id)) for b in recent],
         }
 
 
@@ -578,8 +581,8 @@ def start_build(project_id: str, payload: BuildIn, state=Depends(get_state)):
 def list_builds(limit: int = 50, state=Depends(get_state)):
     with state["session_factory"]() as session:
         builds = session.scalars(select(Build).order_by(Build.number.desc()).limit(min(limit, 200))).all()
-        names = {p.id: p.name for p in session.scalars(select(Project)).all()}
-        return [{**_build_json(b), "project_name": names.get(b.project_id)} for b in builds]
+        projects = {p.id: p for p in session.scalars(select(Project)).all()}
+        return [_build_json(b, projects.get(b.project_id)) for b in builds]
 
 
 @router.get("/builds/{build_id}")
@@ -736,6 +739,27 @@ def gpu_benchmark_resolve(payload: GpuBenchmarkResolveIn):
             "storage": gpu_benchmark_storage(recipe)}
 
 
+@router.delete("/builds/{build_id}")
+def delete_build(build_id: str, remove_image: bool = True, state=Depends(get_state)):
+    """Delete a finished build with its archives, log, scans and local image."""
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        if build.status in ACTIVE_STATES:
+            raise HTTPException(409, "This build is still running; wait for it to finish before deleting it")
+        image_dirs = [config.settings().image_dir, *storage.previous_image_dirs(session)]
+    try:
+        state["scan_service"].delete_for_build(build_id)
+        return state["build_service"].delete(build_id, image_dirs, remove_image=remove_image)
+    except ScanError as exc:
+        raise HTTPException(409, str(exc))
+    except BuildError as exc:
+        raise HTTPException(409, str(exc))
+    except LookupError:
+        raise HTTPException(404, "Build not found")
+
+
 @router.post("/builds/{build_id}/airgap", status_code=201)
 def create_airgap(build_id: str, state=Depends(get_state)):
     try:
@@ -871,6 +895,9 @@ def create_app(settings=None) -> FastAPI:
     settings.prepare()
     backend = make_backend(settings)
     service = BuildService(session_factory, backend, settings=settings)
+    # Before any worker starts: a build that was running when the process
+    # stopped can never finish, and must not show as running forever.
+    service.recover_interrupted()
     scanner = scanners.make_scanner(settings)
     scan_service = ScanService(session_factory, backend, scanner, settings=settings, log_bus=service.logs)
     # Scanning is bolted on here rather than inside the build pipeline, so a
