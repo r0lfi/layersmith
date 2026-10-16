@@ -113,3 +113,17 @@ def test_builds_a_restart_left_running_are_marked_failed(client, tmp_path):
         build = session.get(Build, stuck["id"])
         assert build.status == "failed" and "Interrupted" in build.error and build.finished_at
     assert client.delete(f"/api/builds/{stuck['id']}").status_code == 200
+
+
+def test_scans_a_restart_left_running_are_marked_failed_and_no_longer_block_delete(client):
+    _, build = built(client)
+    with client.state["session_factory"]() as session:
+        session.add(Scan(build_id=build["id"], state="scanning"))
+        session.commit()
+    assert client.delete(f"/api/builds/{build['id']}").status_code == 409
+    settings = client.state["settings"]
+    create_app(config.reset_for_tests(**settings.__dict__))  # what a restart does
+    with make_session_factory(make_engine(settings.database_url))() as session:
+        scan = session.query(Scan).one()
+        assert scan.state == "failed" and "Interrupted" in scan.error and scan.finished_at
+    assert client.delete(f"/api/builds/{build['id']}").status_code == 200

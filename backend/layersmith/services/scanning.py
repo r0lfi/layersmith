@@ -367,6 +367,21 @@ class ScanService:
 
     # ------------------------------------------------------------ removal
 
+    def recover_interrupted(self) -> int:
+        """Fail scans a stop or restart left active; nothing will ever finish them.
+
+        Called once at startup, before any scan worker exists. Without this a
+        scan interrupted by an upgrade showed "scanning" forever and blocked
+        deleting its build.
+        """
+        with self.session_factory() as session:
+            stale = session.scalars(select(Scan).where(Scan.state.in_(SCAN_ACTIVE_STATES))).all()
+            for scan in stale:
+                scan.state, scan.finished_at = "failed", utcnow()
+                scan.error = "Interrupted: LayerSmith stopped while this scan was running. Scan again."
+            session.commit()
+            return len(stale)
+
     def delete_for_build(self, build_id: str) -> int:
         """Remove every scan of a build, its findings and its files.
 

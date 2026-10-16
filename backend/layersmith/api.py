@@ -1133,6 +1133,7 @@ def create_app(settings=None) -> FastAPI:
     # Temporary scan exports are removed as each scan ends; this clears any
     # left behind by a crash or a kill.
     sweep_temporary_exports(settings)
+    scan_service.recover_interrupted()
 
     app = FastAPI(title=config.APP_NAME, version=config.VERSION,
                   description=f"{config.TAGLINE} by xnett.org")
