@@ -37,6 +37,7 @@ MOVABLE_PATHS = {
     "log_dir": "LAYERSMITH_LOG_DIR",
     "tmp_dir": "LAYERSMITH_TMP_DIR",
     "scan_dir": "LAYERSMITH_SCAN_DIR",
+    "model_dir": "LAYERSMITH_MODEL_DIR",
 }
 
 
@@ -106,6 +107,12 @@ class Settings:
     #: Largest part of a split image archive. Capped below 1 GB (10^9 bytes)
     #: so every part fits through a transfer limit of "under 1 GB".
     split_part_bytes: int = 900_000_000
+    #: Downloaded LLM models, one folder each (see services/llm_models.py).
+    #: Often the largest thing LayerSmith stores, so it is its own path.
+    model_dir: Path = Path("/data/models")
+    #: Where model metadata and files come from. A mirror or a test server
+    #: can stand in for huggingface.co.
+    hf_endpoint: str = "https://huggingface.co"
 
     def apply_overrides(self, overrides: dict) -> None:
         """Apply administrator-set paths, ignoring any pinned by the environment."""
@@ -117,7 +124,7 @@ class Settings:
     @property
     def directories(self) -> list[Path]:
         return [self.data_dir, self.image_dir, self.build_dir, self.upload_dir, self.log_dir, self.tmp_dir,
-                self.scan_dir]
+                self.scan_dir, self.model_dir]
 
     def prepare(self) -> None:
         """Create the directories and fail loudly if any is not writable."""
@@ -176,6 +183,8 @@ def load() -> Settings:
         # deployment points it wherever the assets were unpacked.
         static_dir=Path(os.environ["LAYERSMITH_STATIC_DIR"]) if os.environ.get("LAYERSMITH_STATIC_DIR") else None,
         split_part_bytes=int(os.environ.get("LAYERSMITH_SPLIT_PART_BYTES", 900_000_000)),
+        model_dir=_path("LAYERSMITH_MODEL_DIR", data_dir / "models"),
+        hf_endpoint=os.environ.get("LAYERSMITH_HF_ENDPOINT", "https://huggingface.co").rstrip("/"),
     )
 
 
@@ -193,7 +202,7 @@ def settings() -> Settings:
 #: one gets there.
 DERIVED_PATHS = {
     "image_dir": "images", "build_dir": "builds", "upload_dir": "uploads",
-    "log_dir": "logs", "tmp_dir": "tmp", "scan_dir": "scans",
+    "log_dir": "logs", "tmp_dir": "tmp", "scan_dir": "scans", "model_dir": "models",
 }
 
 

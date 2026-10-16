@@ -82,6 +82,14 @@ and shows you the Containerfile it produced before anything is built.
   and each build records its Containerfile, base digest, package list, file
   checksums and log.
 - **Digest-pinned bases**, so a rebuild does not silently follow a moved tag.
+- **LLM models for offline GPU hosts** — download open models from Hugging
+  Face on the Models page (with a curated list for NVIDIA H200), verified
+  against Hugging Face's checksums and handed over in parts under 1 GB with
+  an install script. See [docs/models.md](docs/models.md).
+- **GPU kit** — the GPU benchmark image, chosen models, `setup.sh` and
+  `start_container.sh` in parts under 1 GB: one `bash setup.sh` on the GPU
+  host checks disk space, loads the image, installs the models and starts
+  the dashboard.
 - **Delete builds** from the Builds list: the record, its archives, log, scan
   results and local image go together; anything another build still uses is
   kept. Running builds cannot be deleted, and a build a restart interrupted is
@@ -322,8 +330,10 @@ Everything is optional; see [.env.example](.env.example) for the full list.
 | `LAYERSMITH_SCAN_KINDS` | `vulnerability,secret` | What a scan looks for |
 | `LAYERSMITH_GENERATE_SBOM` | `1` | Produce a CycloneDX SBOM with a scan |
 | `LAYERSMITH_SPLIT_PART_BYTES` | `900000000` | Part size of a split archive (at most 900 MB) |
+| `LAYERSMITH_MODEL_DIR` | `$DATA/models` | Downloaded LLM models |
+| `LAYERSMITH_HF_ENDPOINT` | `https://huggingface.co` | Where models are downloaded from |
 
-The six paths under the data directory are also editable at runtime in
+The seven paths under the data directory are also editable at runtime in
 **Settings → Storage**. A value set in the environment wins and is shown
 read-only there. Changing a path never moves existing files, and archives
 written earlier stay downloadable.

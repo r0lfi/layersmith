@@ -106,6 +106,7 @@ gives you, use option 3.
 | `LAYERSMITH_UPLOAD_DIR` | `$DATA/uploads` | uploaded files, one copy per checksum |
 | `LAYERSMITH_LOG_DIR` | `$DATA/logs` | one log file per build |
 | `LAYERSMITH_TMP_DIR` | `$DATA/tmp` | scratch space while bundling |
+| `LAYERSMITH_MODEL_DIR` | `$DATA/models` | downloaded LLM models, one folder each (see [models.md](models.md)) |
 
 Everything except the data directory itself is also editable in **Settings →
 Storage**, stored in the database and applied without a restart. A path set

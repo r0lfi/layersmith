@@ -229,29 +229,9 @@ class SplitService:
     def compute(path: Path, archive: str, expected: str | None, size: int, progress=None) -> dict:
         """One read of the archive: a sha256 per part plus the archive's own."""
         before = _file_identity(path)
-        ranges = plan(before["size"], size)
-        whole = hashlib.sha256()
-        parts = []
-        done = 0
-        with open(path, "rb") as handle:
-            for index, (offset, length) in enumerate(ranges):
-                digest = hashlib.sha256()
-                remaining = length
-                while remaining > 0:
-                    chunk = handle.read(min(READ_CHUNK, remaining))
-                    if not chunk:
-                        raise SplitError("The archive is shorter than it was a moment ago; try again")
-                    digest.update(chunk)
-                    whole.update(chunk)
-                    remaining -= len(chunk)
-                    done += len(chunk)
-                    if progress:
-                        progress(done)
-                parts.append({"index": index, "name": part_name(archive, index, len(ranges)),
-                              "offset": offset, "size": length, "sha256": digest.hexdigest()})
+        parts, checksum = hash_parts(_file_chunks(path, before["size"]), before["size"], archive, size, progress)
         if _file_identity(path) != before:
             raise SplitError("The archive changed while it was being split; try again")
-        checksum = whole.hexdigest()
         if expected and checksum != expected:
             raise SplitError(f"The archive on disk no longer matches its recorded checksum "
                              f"(sha256:{expected[:12]}… recorded, sha256:{checksum[:12]}… now); "
@@ -259,6 +239,50 @@ class SplitService:
         return {"version": 1, "archive": archive, "archive_size": before["size"],
                 "archive_mtime_ns": before["mtime_ns"], "archive_sha256": checksum, "part_size": size,
                 "parts": parts, "created_at": utcnow().isoformat()}
+
+
+def _file_chunks(path: Path, total: int):
+    with open(path, "rb") as handle:
+        remaining = total
+        while remaining > 0:
+            chunk = handle.read(min(READ_CHUNK, remaining))
+            if not chunk:
+                raise SplitError("The archive is shorter than it was a moment ago; try again")
+            remaining -= len(chunk)
+            yield chunk
+
+
+def hash_parts(chunks, total: int, archive: str, size: int, progress=None) -> tuple[list[dict], str]:
+    """Checksum each part of a byte stream of `total` bytes, and the whole stream.
+
+    The stream can be a file or a generated one (a model's tar, see vtar.py):
+    parts are only (offset, length) ranges of it either way.
+    """
+    ranges = plan(total, size)
+    whole = hashlib.sha256()
+    parts, done, index = [], 0, 0
+    digest, filled = hashlib.sha256(), 0
+    for chunk in chunks:
+        view = memoryview(chunk)
+        while view:
+            take = min(len(view), ranges[index][1] - filled)
+            piece = view[:take]
+            digest.update(piece)
+            whole.update(piece)
+            filled += take
+            view = view[take:]
+            if filled == ranges[index][1] and index < len(ranges) - 1:
+                parts.append({"index": index, "name": part_name(archive, index, len(ranges)),
+                              "offset": ranges[index][0], "size": filled, "sha256": digest.hexdigest()})
+                index, digest, filled = index + 1, hashlib.sha256(), 0
+        done += len(chunk)
+        if progress:
+            progress(done)
+    if done != total:
+        raise SplitError(f"Read {done} bytes, expected {total}; the source changed while it was being split")
+    parts.append({"index": index, "name": part_name(archive, index, len(ranges)),
+                  "offset": ranges[index][0], "size": filled, "sha256": digest.hexdigest()})
+    return parts, whole.hexdigest()
 
 
 # ------------------------------------------------------- assemble script

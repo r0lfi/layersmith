@@ -5,6 +5,7 @@ import { Banner, Card, StatusPill, isActive, useLoad } from "../components/ui";
 import { SecurityPanel } from "../components/Security";
 import { TrainingPanel } from "../components/Training";
 import { SplitControls, SplitFiles, useSplit } from "../components/SplitArchive";
+import { GpuKit } from "../components/GpuKit";
 
 function LogLine({ line }: { line: string }) {
   const className = /^STEP |^--> /.test(line)
@@ -53,8 +54,8 @@ function GpuBenchmarkPanel({ build }: { build: Build }) {
                   </a>
                   <a className="button" href={api.downloadUrl(build.id, "export.sha256")}>SHA-256 file</a>
                   <span className="faint" style={{ flexBasis: "100%", fontSize: "0.85rem" }}>
-                    Can only move files under 1 GB? Use <a href="#image-archive">Download split archive</a> under
-                    Image archive: parts of 900 MB plus <span className="mono">assemble-image.sh</span>.
+                    Can only move files under 1 GB, or want the models and a one-command setup too? Use the{" "}
+                    <a href="#gpu-kit">GPU kit</a> below.
                   </span>
                 </>
               ) : (
@@ -243,6 +244,7 @@ export default function BuildDetail() {
       )}
 
       {build.gpu_benchmark && <GpuBenchmarkPanel build={build} />}
+      {build.gpu_benchmark && build.status === "ready" && build.has_export && <GpuKit buildId={build.id} />}
 
       {build.status === "ready" && (
         <SecurityPanel

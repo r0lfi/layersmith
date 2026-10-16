@@ -66,6 +66,69 @@ export interface SplitStatus {
   created_at?: string;
 }
 
+/* ------------------------------------------------------------ LLM models */
+
+export interface LlmModel {
+  id: string;
+  name: string;
+  repo_id: string;
+  revision?: string | null;
+  requested_revision: string;
+  catalog_key?: string | null;
+  status: "queued" | "downloading" | "verifying" | "ready" | "failed";
+  error?: string | null;
+  license?: string | null;
+  total_bytes: number;
+  done_bytes: number;
+  file_count: number;
+  part_count: number;
+  created_at: string;
+  finished_at?: string | null;
+}
+
+export interface CatalogModel {
+  key: string;
+  repo_id: string;
+  purpose: string;
+  params: string;
+  precision: string;
+  size_gb: number;
+  gpus: number;
+  license: string;
+  why: string;
+  local: LlmModel | null;
+}
+
+export interface ModelCatalog {
+  purposes: Record<string, string>;
+  models: CatalogModel[];
+  gpu: string;
+  model_dir: string;
+  free_bytes: number | null;
+}
+
+export interface DownloadFile {
+  name: string;
+  kind: "part" | "script" | "checksum";
+  size?: number;
+  sha256?: string;
+  url: string;
+}
+
+export interface GpuKit {
+  build_id: string;
+  image: string;
+  image_split: SplitStatus["state"];
+  image_split_progress?: { done: number; total: number } | null;
+  models: string[];
+  problems: string[];
+  files: DownloadFile[];
+  query: string;
+  total_bytes: number;
+  gpu_host_needs_bytes: number;
+  ready: boolean;
+}
+
 /* ------------------------------------------------- LLM training profiles */
 
 export interface TrainingRequest {
@@ -504,6 +567,18 @@ export const api = {
   startSplit: (buildId: string) => request<SplitStatus>(`/builds/${buildId}/split`, { method: "POST" }),
   splitFileUrl: (buildId: string, name: string) =>
     `/api/builds/${buildId}/split/${encodeURIComponent(name)}`,
+
+  llmCatalog: () => request<ModelCatalog>("/llm-models/catalog"),
+  llmModels: () => request<LlmModel[]>("/llm-models"),
+  requestModel: (body: { repo_id: string; revision?: string; catalog_key?: string }) =>
+    request<LlmModel>("/llm-models", { method: "POST", body: JSON.stringify(body) }),
+  retryModel: (id: string) => request<LlmModel>(`/llm-models/${id}/retry`, { method: "POST" }),
+  deleteModel: (id: string) =>
+    request<{ deleted: string; freed_bytes: number }>(`/llm-models/${id}`, { method: "DELETE" }),
+  modelFiles: (id: string) =>
+    request<{ model: LlmModel; files: DownloadFile[]; install: string }>(`/llm-models/${id}/files`),
+  gpuKit: (buildId: string, models: string[]) =>
+    request<GpuKit>(`/builds/${buildId}/kit?models=${models.map(encodeURIComponent).join(",")}`),
 
   scans: (buildId: string) => request<Scan[]>(`/builds/${buildId}/scans`),
   startScan: (buildId: string) => request<Scan>(`/builds/${buildId}/scan`, { method: "POST", body: "{}" }),

@@ -6,6 +6,7 @@ import ProjectDetail from "./pages/ProjectDetail";
 import Builds from "./pages/Builds";
 import BuildDetail from "./pages/BuildDetail";
 import SettingsPage from "./pages/Settings";
+import Models from "./pages/Models";
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/projects">Images</NavLink>
           <NavLink to="/builds">Builds</NavLink>
+          <NavLink to="/models">Models</NavLink>
           <NavLink to="/settings">Settings</NavLink>
         </nav>
       </header>
@@ -36,6 +38,7 @@ export default function App() {
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/builds" element={<Builds />} />
           <Route path="/builds/:id" element={<BuildDetail />} />
+          <Route path="/models" element={<Models />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Routes>

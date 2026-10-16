@@ -32,11 +32,13 @@ from layersmith.core.spec import (
     validate_spec, version_key,
 )
 from layersmith.models import (
-    ACTIVE_STATES, Blob, Build, Project, Scan, ScanFinding, create_all, make_engine, make_session_factory,
+    ACTIVE_STATES, Blob, Build, LlmModel, Project, Scan, ScanFinding, create_all, make_engine, make_session_factory,
     next_build_number, utcnow,
 )
 from layersmith import scanners
-from layersmith.services import splitting, storage
+from layersmith.services import llm_models, splitting, storage
+from layersmith.llm import catalog as llm_catalog
+from layersmith.llm import scripts as llm_scripts
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 from layersmith.services.scanning import ScanError, ScanService, finding_row, summarise, sweep_temporary_exports
 from layersmith.services.builds import training_recipe
@@ -59,7 +61,7 @@ LOG_CHUNK_MAX_BYTES = 1024 * 1024
 
 #: Optional API additions a client can check for instead of guessing from the
 #: version. Additive only: a client must keep working without any of them.
-API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build"]
+API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit"]
 
 
 # ------------------------------------------------------------- schemas
@@ -104,6 +106,12 @@ class TrainingResolveIn(BaseModel):
 
 class GpuBenchmarkResolveIn(BaseModel):
     gpu_benchmark: dict = Field(default_factory=dict)
+
+
+class ModelIn(BaseModel):
+    repo_id: str
+    revision: str = "main"
+    catalog_key: str | None = None
 
 
 class GpuReportIn(BaseModel):
@@ -840,6 +848,223 @@ def split_download(build_id: str, filename: str, state=Depends(get_state)):
                              headers={**attachment, "Content-Length": str(part["size"])})
 
 
+# ------------------------------------------------------------- LLM models
+
+def _model_json(model: LlmModel, service: llm_models.ModelService) -> dict:
+    parts = service.current_parts(model)
+    return {"id": model.id, "name": model.name, "repo_id": model.repo_id, "revision": model.revision,
+            "requested_revision": model.requested_revision, "catalog_key": model.catalog_key,
+            "status": model.status, "error": model.error, "license": model.license,
+            "total_bytes": model.total_bytes, "done_bytes": service.progress(model),
+            "file_count": len(model.files or []), "part_count": len(parts["parts"]) if parts else 0,
+            "created_at": model.created_at, "finished_at": model.finished_at}
+
+
+def _load_model(session, model_id: str) -> LlmModel:
+    model = session.get(LlmModel, model_id)
+    if model is None:
+        raise HTTPException(404, "Model not found")
+    return model
+
+
+def _model_files(model: LlmModel, parts: dict) -> list[dict]:
+    """Every file of one model's split download, in fetch order."""
+    base = f"/api/llm-models/{model.id}/files/"
+    part_sums, file_sums = llm_models.checksum_names(model.name)
+    files = [{"name": p["name"], "kind": "part", "size": p["size"], "sha256": p["sha256"], "url": base + p["name"]}
+             for p in parts["parts"]]
+    for name, kind, text in ((llm_models.install_script_name(model.name), "script",
+                              llm_scripts.install_model(model, parts)),
+                             (part_sums, "checksum", "".join(f"{p['sha256']}  {p['name']}\n" for p in parts["parts"])),
+                             (file_sums, "checksum", "".join(f"{f['sha256']}  {f['name']}\n" for f in model.files))):
+        files.append({"name": name, "kind": kind, "size": len(text.encode()), "url": base + name, "_text": text})
+    return files
+
+
+def _public(files: list[dict]) -> list[dict]:
+    return [{k: v for k, v in f.items() if not k.startswith("_")} for f in files]
+
+
+def _server_url(request: Request) -> str:
+    """The address the browser used, also behind a reverse proxy."""
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{scheme}://{host.split(',')[0].strip()}"
+
+
+@router.get("/llm-models/catalog")
+def llm_model_catalog(state=Depends(get_state)):
+    with state["session_factory"]() as session:
+        local = {m.repo_id: m for m in session.scalars(select(LlmModel)).all()}
+        service = state["model_service"]
+        entries = [{**entry, "local": _model_json(local[entry["repo_id"]], service)
+                    if entry["repo_id"] in local else None} for entry in llm_catalog.CATALOG]
+    directory = Path(config.settings().model_dir)
+    usage = shutil.disk_usage(directory) if directory.is_dir() else None
+    return {"purposes": llm_catalog.PURPOSES, "models": entries, "gpu": "NVIDIA H200 (141 GB HBM3e)",
+            "model_dir": str(directory), "free_bytes": usage.free if usage else None}
+
+
+@router.get("/llm-models")
+def list_llm_models(state=Depends(get_state)):
+    with state["session_factory"]() as session:
+        models = session.scalars(select(LlmModel).order_by(LlmModel.created_at.desc())).all()
+        return [_model_json(m, state["model_service"]) for m in models]
+
+
+@router.post("/llm-models", status_code=202)
+def request_llm_model(payload: ModelIn, state=Depends(get_state)):
+    """Check the model on Hugging Face, then download it in the background."""
+    service = state["model_service"]
+    repo_id = payload.repo_id.strip()
+    if payload.catalog_key:
+        entry = llm_catalog.BY_KEY.get(payload.catalog_key)
+        if entry is None:
+            raise HTTPException(422, "Unknown catalog entry")
+        repo_id = entry["repo_id"]
+    try:
+        model_id = service.request(repo_id, payload.revision.strip() or "main", payload.catalog_key)
+    except llm_models.ModelError as exc:
+        raise HTTPException(422, str(exc))
+    with state["session_factory"]() as session:
+        return _model_json(_load_model(session, model_id), service)
+
+
+@router.post("/llm-models/{model_id}/retry", status_code=202)
+def retry_llm_model(model_id: str, state=Depends(get_state)):
+    with state["session_factory"]() as session:
+        model = _load_model(session, model_id)
+        if model.status != "failed":
+            raise HTTPException(409, "Only a failed download can be retried")
+        model.status, model.error = "queued", None
+        session.commit()
+    state["model_service"].enqueue(model_id)
+    with state["session_factory"]() as session:
+        return _model_json(_load_model(session, model_id), state["model_service"])
+
+
+@router.delete("/llm-models/{model_id}")
+def delete_llm_model(model_id: str, state=Depends(get_state)):
+    try:
+        freed = state["model_service"].delete(model_id)
+    except LookupError:
+        raise HTTPException(404, "Model not found")
+    return {"deleted": model_id, "freed_bytes": freed}
+
+
+@router.get("/llm-models/{model_id}/files")
+def llm_model_files(model_id: str, request: Request, state=Depends(get_state)):
+    with state["session_factory"]() as session:
+        model = _load_model(session, model_id)
+        parts = state["model_service"].current_parts(model)
+        if parts is None:
+            raise HTTPException(409, "The model is not ready, or its files changed on disk")
+        files = _public(_model_files(model, parts))
+        script = f"download-{model.name}.sh"
+        files.append({"name": script, "kind": "script", "url": f"/api/llm-models/{model.id}/files/{script}"})
+        return {"model": _model_json(model, state["model_service"]), "files": files,
+                "install": f"./{llm_models.install_script_name(model.name)} --dir /opt/models"}
+
+
+@router.get("/llm-models/{model_id}/files/{filename}")
+def llm_model_file(model_id: str, filename: str, request: Request, state=Depends(get_state)):
+    """One file of a model's split download; only listed names exist."""
+    service = state["model_service"]
+    with state["session_factory"]() as session:
+        model = _load_model(session, model_id)
+        parts = service.current_parts(model)
+        if parts is None:
+            raise HTTPException(404, "The model is not ready, or its files changed on disk")
+        files = _model_files(model, parts)
+        session.expunge(model)
+    attachment = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if filename == f"download-{model.name}.sh":
+        text = llm_scripts.download_all(f"model {model.repo_id}", _server_url(request), _public(files),
+                                        f"./{llm_models.install_script_name(model.name)}")
+        return Response(text, media_type="text/plain", headers=attachment)
+    item = next((f for f in files if f["name"] == filename), None)
+    if item is None:
+        raise HTTPException(404, "No such file for this model")
+    if "_text" in item:
+        return Response(item["_text"], media_type="text/plain", headers=attachment)
+    part = next(p for p in parts["parts"] if p["name"] == filename)
+    return StreamingResponse(service.read_part(model, part), media_type="application/octet-stream",
+                             headers={**attachment, "Content-Length": str(part["size"])})
+
+
+# ---------------------------------------------------------------- GPU kit
+
+def _kit(build_id: str, model_ids: str, state) -> dict:
+    """Image parts + model parts + scripts for one GPU benchmark build."""
+    service = state["model_service"]
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        if gpu_benchmark_recipe(build.spec) is None:
+            raise HTTPException(404, "Kits exist for GPU benchmark builds only")
+        image = state["split_service"].status(build)
+        wanted = [m for m in dict.fromkeys(filter(None, (model_ids or "").split(",")))]
+        models, problems = [], []
+        for model_id in wanted:
+            model = session.get(LlmModel, model_id)
+            parts = service.current_parts(model) if model else None
+            if parts is None:
+                problems.append(f"Model {model.name if model else model_id} is not ready")
+                continue
+            session.expunge(model)
+            models.append((model, parts))
+        manifest = splitting.current_manifest(build)
+        files = []
+        if manifest:
+            files += [{**f, "url": f"/api/builds/{build.id}/split/{f['name']}"} for f in splitting.downloads(manifest)]
+        for model, parts in models:
+            files += _model_files(model, parts)
+        image_ref = build.image_ref or "localhost/gpu-benchmark:1.0.0"
+        archive = image.get("archive") or "image.tar"
+        setup_text = llm_scripts.setup(image_ref, build.image_id, archive, build.export_size or 0,
+                                       build.image_size or 0, [(m.name, sum(f["size"] for f in m.files))
+                                                               for m, _ in models])
+        start_text = llm_scripts.start_container(image_ref)
+        selection = ",".join(m.id for m, _ in models)
+        query = f"?models={selection}" if selection else ""
+        for name, text in (("setup.sh", setup_text), ("start_container.sh", start_text)):
+            files.append({"name": name, "kind": "script", "size": len(text.encode()),
+                          "url": f"/api/builds/{build.id}/kit/{name}{query}", "_text": text})
+        need = (build.export_size or 0) * 2 + (build.image_size or 0) + sum(
+            sum(f["size"] for f in m.files) for m, _ in models)
+        return {"build_id": build.id, "image": image_ref, "image_split": image["state"],
+                "image_split_progress": image.get("progress"), "models": [m.id for m, _ in models],
+                "problems": problems, "files": files, "query": query,
+                "total_bytes": sum(int(f.get("size") or 0) for f in files),
+                "gpu_host_needs_bytes": need, "ready": bool(manifest) and not problems}
+
+
+@router.get("/builds/{build_id}/kit")
+def gpu_kit(build_id: str, models: str = "", state=Depends(get_state)):
+    kit = _kit(build_id, models, state)
+    files = _public(kit["files"])
+    files.append({"name": "download-all.sh", "kind": "script",
+                  "url": f"/api/builds/{build_id}/kit/download-all.sh{kit['query']}"})
+    return {**kit, "files": files}
+
+
+@router.get("/builds/{build_id}/kit/{filename}")
+def gpu_kit_file(build_id: str, filename: str, request: Request, models: str = "", state=Depends(get_state)):
+    kit = _kit(build_id, models, state)
+    attachment = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if filename == "download-all.sh":
+        if not kit["ready"]:
+            raise HTTPException(409, "Split the image archive first (and wait for the models to be ready)")
+        text = llm_scripts.download_all(f"GPU kit for {kit['image']}", _server_url(request), _public(kit["files"]),
+                                        "chmod +x *.sh && ./setup.sh")
+        return Response(text, media_type="text/plain", headers=attachment)
+    item = next((f for f in kit["files"] if f["name"] == filename and "_text" in f), None)
+    if item is None:
+        raise HTTPException(404, "No such kit file")
+    return Response(item["_text"], media_type="text/plain", headers=attachment)
+
+
 @router.post("/uploads", status_code=201)
 async def upload(file: UploadFile = File(...), state=Depends(get_state)):
     """Content-addressed upload: the checksum is the identity used in specs."""
@@ -898,6 +1123,7 @@ def create_app(settings=None) -> FastAPI:
     # Before any worker starts: a build that was running when the process
     # stopped can never finish, and must not show as running forever.
     service.recover_interrupted()
+    model_service = llm_models.ModelService(session_factory, settings=settings)
     scanner = scanners.make_scanner(settings)
     scan_service = ScanService(session_factory, backend, scanner, settings=settings, log_bus=service.logs)
     # Scanning is bolted on here rather than inside the build pipeline, so a
@@ -912,7 +1138,10 @@ def create_app(settings=None) -> FastAPI:
                   description=f"{config.TAGLINE} by xnett.org")
     app.state.layersmith = {"session_factory": session_factory, "build_service": service,
                             "scan_service": scan_service, "settings": settings,
-                            "split_service": splitting.SplitService(session_factory, settings=settings)}
+                            "split_service": splitting.SplitService(session_factory, settings=settings),
+                            "model_service": model_service}
+    # Unfinished model downloads continue where they stopped.
+    model_service.recover()
     app.include_router(router)
 
     # The built web UI, when it has been compiled into ./static (see the

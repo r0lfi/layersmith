@@ -198,7 +198,7 @@ def run_command(image: str) -> str:
             "  --device nvidia.com/gpu=all \\\n"
             "  --security-opt=label=disable \\\n"
             "  --shm-size=16g \\\n"
-            "  -v /models:/models:ro \\\n"
+            "  -v /opt/models:/models:ro \\\n"
             "  -v /opt/gpu-results:/results \\\n"
             f"  {image}")
 
@@ -214,7 +214,7 @@ def getting_started(recipe: dict, image: str = "localhost/gpu-benchmark:1.0.0") 
         "cuda": recipe["cuda_version"], "python": recipe["python_full_version"], "tools": recipe["tools"],
         "driver_minimum": recipe["driver_minimum"],
         "check_host": "nvidia-smi\nnvidia-ctk cdi list        # must list nvidia.com/gpu=all\n"
-                      "sudo mkdir -p /opt/gpu-results",
+                      "sudo mkdir -p /opt/gpu-results /opt/models   # models: one Hugging Face folder each",
         "load": f"podman load -i {archive}\npodman images | grep gpu-benchmark",
         "verify": f"sha256sum -c {archive}.sha256   # or compare with the checksum shown in LayerSmith",
         "podman": run_command(image),
@@ -233,12 +233,15 @@ def getting_started(recipe: dict, image: str = "localhost/gpu-benchmark:1.0.0") 
             "gpu-bench report latest",
         ],
         "batch_example": f"podman run --rm --device nvidia.com/gpu=all --security-opt=label=disable --shm-size=16g \\\n"
-                         f"  -v /models:/models:ro -v /opt/gpu-results:/results {image} \\\n"
+                         f"  -v /opt/models:/models:ro -v /opt/gpu-results:/results {image} \\\n"
                          "  gpu-bench full --model /models/<model>",
         "notes": [
             f"The host needs the NVIDIA driver {recipe['driver_minimum']} or newer and the NVIDIA Container Toolkit "
             "with CDI (nvidia-ctk cdi generate). The image never installs or changes drivers.",
-            "Models are read from /models only; nothing is downloaded at runtime (Hugging Face offline mode).",
+            "Models are read from /models only (mounted from /opt/models); nothing is downloaded at runtime "
+            "(Hugging Face offline mode). Download models on LayerSmith's Models page.",
+            "The GPU kit on the build page bundles image, models, setup.sh and start_container.sh in parts under "
+            "1 GB: on the GPU host, bash setup.sh does the rest.",
             "Every run is saved in its own folder under /results; earlier runs are never overwritten.",
             "Multi-node NCCL needs RDMA devices, host networking and memlock limits: see the multi-node guide "
             "in docs/gpu-benchmark.md and the scripts under /opt/gpu-bench/scripts.",
