@@ -58,11 +58,14 @@ When files over 1 GB cannot be moved, or you want models along, use the
 1. Tick models in the wizard's **LLM models** card (downloads start when you
    press Build and run alongside it), or download them on the **Models** page
    (see [models.md](models.md)).
-2. On the build page, tick the models, press **Prepare image parts**, then
-   download **download-all.sh** and run it where LayerSmith is reachable:
-   `mkdir gpu-kit && cd gpu-kit && bash ~/Downloads/download-all.sh`. It
-   fetches every file (image and model parts of at most 900 MB, the scripts),
-   resumes interrupted downloads and checks every part's sha256.
+2. On the build page the image parts are prepared automatically and the
+   chosen models are ticked once downloaded. Press **Download all**: in
+   Chrome or Edge you choose an empty folder and every file (image and model
+   parts of at most 900 MB, the scripts) is saved into it, with progress;
+   choosing the same folder again resumes. Other browsers put the files in
+   their download folder one by one. Or run **download-all.sh** where
+   LayerSmith is reachable (`mkdir gpu-kit && cd gpu-kit && bash
+   ~/Downloads/download-all.sh`), which also checks every part's sha256.
 3. Copy the directory to the GPU host and run `bash setup.sh` there.
 
 `setup.sh` checks the host and the free space per disk (archive, podman's

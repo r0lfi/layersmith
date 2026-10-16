@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, formatDecimalBytes, GpuKit as Kit, LlmModel } from "../api";
 import { Banner, Card, usePoll } from "./ui";
 import { FileTable } from "../pages/Models";
+import { DownloadAllButton } from "./DownloadAll";
 
 /** Everything an offline GPU host needs, in parts under 1 GB, plus setup.sh. */
 export function GpuKit({ buildId }: { buildId: string }) {
@@ -103,9 +104,14 @@ export function GpuKit({ buildId }: { buildId: string }) {
               about {formatDecimalBytes(kit.gpu_host_needs_bytes)} free while installing (archive, unpacked image,
               models); <span className="mono">setup.sh</span> checks this per disk before it starts.
             </p>
+            {kit.ready && (
+              <div style={{ marginBottom: "0.8rem" }}>
+                <DownloadAllButton files={kit.files.filter((file) => file.size !== undefined)} />
+              </div>
+            )}
             <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
               {kit.ready && script("download-all.sh") ? (
-                <a className="button primary" href={script("download-all.sh")!.url}>download-all.sh</a>
+                <a className="button" href={script("download-all.sh")!.url}>download-all.sh</a>
               ) : (
                 <button className="primary" disabled title="Prepare the image parts first">download-all.sh</button>
               )}
@@ -118,7 +124,8 @@ export function GpuKit({ buildId }: { buildId: string }) {
             {showFiles && <div style={{ marginTop: "0.6rem" }}><FileTable files={kit.files.filter((f) => f.size !== undefined)} /></div>}
 
             <h3>4. On each side</h3>
-            <pre className="code">{`# where LayerSmith is reachable (fetches and verifies every file, resumes):
+            <pre className="code">{`# in the browser: "Download all" into an empty folder, or with a script
+# where LayerSmith is reachable (verifies every part, resumes):
 mkdir gpu-kit && cd gpu-kit
 bash ~/Downloads/download-all.sh
 
