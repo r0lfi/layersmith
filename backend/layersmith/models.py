@@ -103,6 +103,11 @@ class Build(Base):
     airgap_path: Mapped[str | None] = mapped_column(String(500))
     airgap_sha256: Mapped[str | None] = mapped_column(String(64))
     airgap_size: Mapped[int | None] = mapped_column(BigInteger)
+    #: Split download of the export: part offsets, sizes and checksums. The
+    #: parts are byte ranges of export_path, not files of their own; see
+    #: services/splitting.py. Describes one exact archive and is ignored
+    #: once that archive changes.
+    export_parts: Mapped[dict | None] = mapped_column(JSON)
 
     #: Training images only: results of the checks run in (or reported for)
     #: this exact image, {"results": {check id: result}}. Never copied from

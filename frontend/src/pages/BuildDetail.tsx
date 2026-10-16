@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, Build, buildLogSocket, formatBytes, formatDuration, formatWhen } from "../api";
+import { api, Build, buildLogSocket, formatBytes, formatDecimalBytes, formatDuration, formatWhen } from "../api";
 import { Banner, Card, StatusPill, isActive, useLoad } from "../components/ui";
 import { SecurityPanel } from "../components/Security";
 import { TrainingPanel } from "../components/Training";
+import { SplitControls, SplitFiles, useSplit } from "../components/SplitArchive";
 
 function LogLine({ line }: { line: string }) {
   const className = /^STEP |^--> /.test(line)
@@ -51,6 +52,10 @@ function GpuBenchmarkPanel({ build }: { build: Build }) {
                     Download Podman Image (.tar) · {formatBytes(exported.size)}
                   </a>
                   <a className="button" href={api.downloadUrl(build.id, "export.sha256")}>SHA-256 file</a>
+                  <span className="faint" style={{ flexBasis: "100%", fontSize: "0.85rem" }}>
+                    Can only move files under 1 GB? Use <a href="#image-archive">Download split archive</a> under
+                    Image archive: parts of 900 MB plus <span className="mono">assemble-image.sh</span>.
+                  </span>
                 </>
               ) : (
                 <span className="faint">
@@ -92,6 +97,7 @@ export default function BuildDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const split = useSplit(id, !!build && build.status === "ready" && build.has_export);
 
   // One socket per build: it replays the log from the start, then streams.
   useEffect(() => {
@@ -172,17 +178,20 @@ export default function BuildDetail() {
 
           {build.status === "ready" && (
             <div className="grid two" style={{ marginTop: "1rem" }}>
-              <div>
-                <h3>Image archive</h3>
+              <div id="image-archive">
+                <h3>Image archive{build.has_export ? ` – ${formatDecimalBytes(build.export_size)}` : ""}</h3>
                 <p className="faint" style={{ marginTop: "0.2rem" }}>
                   The image on its own, as <span className="mono">podman save</span> /{" "}
                   <span className="mono">docker save</span> writes it. Load it with{" "}
                   <span className="mono">load -i</span> on a machine that already knows what it is getting.
                 </p>
                 {build.has_export && (
-                  <a className="button" href={api.downloadUrl(build.id, "export")}>
-                    Download TAR ({formatBytes(build.export_size)})
-                  </a>
+                  <>
+                    <a className="button" href={api.downloadUrl(build.id, "export")}>
+                      Download TAR ({formatDecimalBytes(build.export_size)})
+                    </a>
+                    <SplitControls split={split} />
+                  </>
                 )}
               </div>
               <div>
@@ -205,6 +214,7 @@ export default function BuildDetail() {
               </div>
             </div>
           )}
+          {build.status === "ready" && build.has_export && <SplitFiles buildId={build.id} split={split} />}
           {build.export_sha256 && (
             <p className="faint mono" style={{ wordBreak: "break-all", marginTop: "0.6rem" }}>
               sha256:{build.export_sha256}

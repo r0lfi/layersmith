@@ -84,6 +84,9 @@ and shows you the Containerfile it produced before anything is built.
 - **Digest-pinned bases**, so a rebuild does not silently follow a moved tag.
 - **Live build logs**, streamed to the browser.
 - **OCI TAR export** with a recorded SHA256.
+- **Split archives** — the same TAR in parts under 1 GB plus a bash-only
+  `assemble-image.sh`, for transfers that refuse large files. See
+  [docs/split-archive.md](docs/split-archive.md).
 - **Air-gap bundles** — image, manifest, source Containerfile, `SHA256SUMS`
   and `INSTALL.txt` in one archive that loads with no network access.
 - **Optional image scanning** — pluggable, off until you configure a scanner,
@@ -314,6 +317,7 @@ Everything is optional; see [.env.example](.env.example) for the full list.
 | `LAYERSMITH_SCAN_AFTER_BUILD` | `1` | Scan each image once it is built |
 | `LAYERSMITH_SCAN_KINDS` | `vulnerability,secret` | What a scan looks for |
 | `LAYERSMITH_GENERATE_SBOM` | `1` | Produce a CycloneDX SBOM with a scan |
+| `LAYERSMITH_SPLIT_PART_BYTES` | `900000000` | Part size of a split archive (at most 900 MB) |
 
 The six paths under the data directory are also editable at runtime in
 **Settings → Storage**. A value set in the environment wins and is shown

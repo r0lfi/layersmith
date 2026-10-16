@@ -42,6 +42,29 @@ export interface Build {
   gpu_benchmark?: GpuBenchmarkDetail | null;
 }
 
+/** Split download of an image archive: parts are byte ranges of the export. */
+export interface SplitFile {
+  name: string;
+  kind: "part" | "script" | "checksum";
+  size: number;
+  sha256?: string;
+}
+
+export interface SplitStatus {
+  state: "none" | "running" | "ready" | "failed";
+  available: boolean;
+  archive?: string | null;
+  archive_size: number;
+  archive_sha256?: string | null;
+  part_size: number;
+  planned_parts: number;
+  progress?: { done: number; total: number } | null;
+  error?: string | null;
+  files: SplitFile[];
+  script: string;
+  created_at?: string;
+}
+
 /* ------------------------------------------------- LLM training profiles */
 
 export interface TrainingRequest {
@@ -473,6 +496,10 @@ export const api = {
   airgap: (buildId: string) =>
     request<{ filename: string; size: number; sha256: string }>(`/builds/${buildId}/airgap`, { method: "POST" }),
   downloadUrl: (buildId: string, kind: "export" | "airgap" | "export.sha256") => `/api/builds/${buildId}/download/${kind}`,
+  split: (buildId: string) => request<SplitStatus>(`/builds/${buildId}/split`),
+  startSplit: (buildId: string) => request<SplitStatus>(`/builds/${buildId}/split`, { method: "POST" }),
+  splitFileUrl: (buildId: string, name: string) =>
+    `/api/builds/${buildId}/split/${encodeURIComponent(name)}`,
 
   scans: (buildId: string) => request<Scan[]>(`/builds/${buildId}/scans`),
   startScan: (buildId: string) => request<Scan>(`/builds/${buildId}/scan`, { method: "POST", body: "{}" }),
@@ -506,6 +533,19 @@ export const api = {
 export function buildLogSocket(buildId: string): WebSocket {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return new WebSocket(`${protocol}//${location.host}/api/builds/${buildId}/logs`);
+}
+
+/** Decimal units (1 MB = 10^6 bytes), for sizes that must stay under a stated limit. */
+export function formatDecimalBytes(bytes?: number | null): string {
+  if (!bytes && bytes !== 0) return "-";
+  const units = ["B", "kB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
 }
 
 export function formatBytes(bytes?: number | null): string {

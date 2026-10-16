@@ -418,3 +418,11 @@ h4 { margin: 0.9rem 0 0.3rem; font-size: 0.9rem; font-weight: 620; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* Split archive progress */
+.progress { height: 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.progress > span { display: block; height: 100%; background: var(--accent); transition: width 0.4s ease; }
+.table td.split-sha { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 720px) {
+  .table td.split-sha { max-width: none; white-space: normal; overflow-wrap: anywhere; font-size: 0.75rem; }
+}

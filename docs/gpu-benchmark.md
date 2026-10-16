@@ -21,7 +21,10 @@ simulated, and no number is taken from a datasheet.
 2. When the build is ready, the build page shows image name, tag, image ID,
    archive size, SHA-256 and export status. Press **Download Podman Image
    (.tar)** and, optionally, **SHA-256 file**.
-3. Copy both files to the GPU server (USB, scp, internal file share).
+3. Copy both files to the GPU server (USB, scp, internal file share). If the
+   transfer only accepts files under 1 GB, use **Download split archive**
+   under Image archive instead and run `./assemble-image.sh` on the GPU
+   server first; see [split-archive.md](split-archive.md).
 4. On the GPU server:
 
 ```sh

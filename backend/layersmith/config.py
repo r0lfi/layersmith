@@ -103,6 +103,9 @@ class Settings:
     agent_url: str
     agent_token: str
     static_dir: Path | None
+    #: Largest part of a split image archive. Capped below 1 GB (10^9 bytes)
+    #: so every part fits through a transfer limit of "under 1 GB".
+    split_part_bytes: int = 900_000_000
 
     def apply_overrides(self, overrides: dict) -> None:
         """Apply administrator-set paths, ignoring any pinned by the environment."""
@@ -172,6 +175,7 @@ def load() -> Settings:
         # package, which is what the Containerfile produces; an installed
         # deployment points it wherever the assets were unpacked.
         static_dir=Path(os.environ["LAYERSMITH_STATIC_DIR"]) if os.environ.get("LAYERSMITH_STATIC_DIR") else None,
+        split_part_bytes=int(os.environ.get("LAYERSMITH_SPLIT_PART_BYTES", 900_000_000)),
     )
 
 

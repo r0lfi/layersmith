@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import (
     APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -36,7 +36,7 @@ from layersmith.models import (
     utcnow,
 )
 from layersmith import scanners
-from layersmith.services import storage
+from layersmith.services import splitting, storage
 from layersmith.services.builds import BuildService, manifest_for, sha256_file
 from layersmith.services.scanning import ScanError, ScanService, finding_row, summarise, sweep_temporary_exports
 from layersmith.services.builds import training_recipe
@@ -59,7 +59,7 @@ LOG_CHUNK_MAX_BYTES = 1024 * 1024
 
 #: Optional API additions a client can check for instead of guessing from the
 #: version. Additive only: a client must keep working without any of them.
-API_FEATURES = ["log-offset", "limits"]
+API_FEATURES = ["log-offset", "limits", "split-archive"]
 
 
 # ------------------------------------------------------------- schemas
@@ -750,6 +750,57 @@ def download(build_id: str, kind: str, state=Depends(get_state)):
         return FileResponse(path, filename=path.name, media_type="application/octet-stream")
 
 
+def _split_build(session, build_id: str) -> Build:
+    build = session.get(Build, build_id)
+    if build is None:
+        raise HTTPException(404, "Build not found")
+    return build
+
+
+@router.get("/builds/{build_id}/split")
+def split_status(build_id: str, state=Depends(get_state)):
+    """Planned or finished split of the export into parts under 1 GB."""
+    with state["session_factory"]() as session:
+        return state["split_service"].status(_split_build(session, build_id))
+
+
+@router.post("/builds/{build_id}/split", status_code=202)
+def start_split(build_id: str, state=Depends(get_state)):
+    """Compute part checksums in the background; poll GET for progress."""
+    with state["session_factory"]() as session:
+        _split_build(session, build_id)
+    try:
+        state["split_service"].start(build_id)
+    except splitting.SplitError as exc:
+        raise HTTPException(409, str(exc))
+    with state["session_factory"]() as session:
+        return state["split_service"].status(_split_build(session, build_id))
+
+
+@router.get("/builds/{build_id}/split/{filename}")
+def split_download(build_id: str, filename: str, state=Depends(get_state)):
+    """One file of a split download. Only names listed in the manifest exist."""
+    with state["session_factory"]() as session:
+        build = _split_build(session, build_id)
+        settings = config.settings()
+        manifest = splitting.current_manifest(build)
+        if manifest is None:
+            raise HTTPException(404, "This archive has not been split, or has changed since; split it again")
+        path = _safe_download(build.export_path, [settings.image_dir, *storage.previous_image_dirs(session)])
+    attachment = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    tar_sums, part_sums = splitting.checksum_file_names(manifest["archive"])
+    text = {splitting.SCRIPT_NAME: splitting.assemble_script, tar_sums: splitting.archive_checksum,
+            part_sums: splitting.parts_checksums}.get(filename)
+    if text is not None:
+        return Response(text(manifest), media_type="text/plain", headers=attachment)
+    part = next((part for part in manifest["parts"] if part["name"] == filename), None)
+    if part is None:
+        raise HTTPException(404, "No such file in this split archive")
+    return StreamingResponse(splitting.read_range(path, part["offset"], part["size"]),
+                             media_type="application/octet-stream",
+                             headers={**attachment, "Content-Length": str(part["size"])})
+
+
 @router.post("/uploads", status_code=201)
 async def upload(file: UploadFile = File(...), state=Depends(get_state)):
     """Content-addressed upload: the checksum is the identity used in specs."""
@@ -818,7 +869,8 @@ def create_app(settings=None) -> FastAPI:
     app = FastAPI(title=config.APP_NAME, version=config.VERSION,
                   description=f"{config.TAGLINE} by xnett.org")
     app.state.layersmith = {"session_factory": session_factory, "build_service": service,
-                            "scan_service": scan_service, "settings": settings}
+                            "scan_service": scan_service, "settings": settings,
+                            "split_service": splitting.SplitService(session_factory, settings=settings)}
     app.include_router(router)
 
     # The built web UI, when it has been compiled into ./static (see the
