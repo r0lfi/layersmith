@@ -202,6 +202,19 @@ def _downloadable(path_value: str | None) -> bool:
         return False
 
 
+def _free_name(session, name: str) -> None:
+    """Give up a deleted project's claim on a name.
+
+    Deleting keeps the row so its builds stay listed, but projects.name is
+    unique in the database: without this, re-creating a deleted project's
+    name failed on the constraint with a 500. The deleted row is renamed to
+    name~<id>, which no new project can be called (NAME_RE has no "~").
+    """
+    for project in session.scalars(select(Project).where(Project.name == name, Project.deleted_at.isnot(None))):
+        project.name = f"{name[:54]}~{project.id[:8]}"
+    session.flush()
+
+
 def _load_project(session, project_id: str) -> Project:
     project = session.get(Project, project_id)
     if project is None or project.deleted_at:
@@ -425,6 +438,7 @@ def create_project(payload: ProjectIn, state=Depends(get_state)):
     with state["session_factory"]() as session:
         if session.scalar(select(Project).where(Project.name == name, Project.deleted_at.is_(None))):
             raise HTTPException(409, f"A project named {name} already exists")
+        _free_name(session, name)
         project = Project(name=name, description=payload.description[:2000], repository=repository,
                           template=payload.template, mode=payload.mode, spec=spec,
                           containerfile=containerfile_text, base_image=base_image)
@@ -499,6 +513,7 @@ def clone_project(project_id: str, payload: CloneIn, state=Depends(get_state)):
             raise HTTPException(422, str(exc))
         if session.scalar(select(Project).where(Project.name == name, Project.deleted_at.is_(None))):
             raise HTTPException(409, f"A project named {name} already exists")
+        _free_name(session, name)
         clone = Project(name=name, description=source.description, template=source.template, mode=source.mode,
                         spec=dict(source.spec or {}), containerfile=source.containerfile,
                         repository=f"{source.repository.rsplit('/', 1)[0]}/{name}"

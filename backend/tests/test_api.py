@@ -235,3 +235,31 @@ def test_log_can_be_read_incrementally_by_offset(client):
 
 def test_log_of_unknown_build_is_404(client):
     assert client.get("/api/builds/missing/log").status_code == 404
+
+
+def test_a_deleted_projects_name_can_be_used_again(client):
+    """Deleting keeps the row (its builds stay listed); the name must still be free."""
+    body = {"name": "gpu-benchmark", "template": "Minimal",
+            "spec": {"base": {"distribution": "Alpine", "version": "3.22"}}}
+    first = client.post("/api/projects", json=body).json()
+    build = client.post(f"/api/projects/{first['id']}/builds", json={}).json()
+    run_pending_build(client, build["id"])
+    assert client.delete(f"/api/projects/{first['id']}").status_code == 204
+
+    again = client.post("/api/projects", json=body)
+    assert again.status_code == 201, again.text
+    assert again.json()["id"] != first["id"]
+    assert [p["name"] for p in client.get("/api/projects").json()] == ["gpu-benchmark"]
+    rebuilt = client.post(f"/api/projects/{again.json()['id']}/builds", json={})
+    assert rebuilt.status_code == 202 and rebuilt.json()["version"] == "1.0.0"
+    # The old build is still there, under its project.
+    assert client.get(f"/api/builds/{build['id']}").status_code == 200
+
+    other = client.post("/api/projects", json={**body, "name": "other"}).json()
+    client.delete(f"/api/projects/{again.json()['id']}")
+    clone = client.post(f"/api/projects/{other['id']}/clone", json={"name": "gpu-benchmark"})
+    assert clone.status_code == 201, clone.text
+    imported = client.post("/api/projects/import", json={"name": "other2", "containerfile": "FROM alpine:3.22\n"})
+    client.delete(f"/api/projects/{imported.json()['id']}")
+    assert client.post("/api/projects/import", json={
+        "name": "other2", "containerfile": "FROM alpine:3.22\n"}).status_code == 201
