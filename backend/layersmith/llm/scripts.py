@@ -234,6 +234,7 @@ START_CONTAINER = r"""#!/usr/bin/env bash
 #
 # Change the defaults with environment variables, for example
 #   MODELS_DIR=/data/models GPUS=0 ./start_container.sh
+#   PODMAN_ARGS="-e NCCL_DEBUG=INFO" ./start_container.sh   extra podman run options
 set -euo pipefail
 
 IMAGE=${IMAGE:-@@IMAGE_Q@@}
@@ -241,6 +242,7 @@ MODELS_DIR=${MODELS_DIR:-/opt/models}        # Hugging Face model folders (confi
 RESULTS_DIR=${RESULTS_DIR:-/opt/gpu-results} # one folder per run ends up here
 GPUS=${GPUS:-all}                            # all, or one GPU: 0, 1, ...
 SHM_SIZE=${SHM_SIZE:-16g}
+CACHE_DIR=${CACHE_DIR:-$RESULTS_DIR/.cache}  # kernels vLLM/FlashInfer/Triton compile, kept between runs
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -256,7 +258,8 @@ if [ ! -d "$RESULTS_DIR" ] && ! mkdir -p "$RESULTS_DIR" 2>/dev/null; then
 fi
 [ -w "$RESULTS_DIR" ] || die "$RESULTS_DIR is not writable by $(id -un); set RESULTS_DIR or fix its permissions"
 
-mounts=(-v "$RESULTS_DIR:/results")
+mkdir -p "$CACHE_DIR" || die "cannot create $CACHE_DIR; set CACHE_DIR"
+mounts=(-v "$RESULTS_DIR:/results" -v "$CACHE_DIR:/cache")
 if [ -d "$MODELS_DIR" ]; then
   mounts+=(-v "$MODELS_DIR:/models:ro")
 else
@@ -266,6 +269,8 @@ fi
 # -it only with a terminal, so this also works from cron or Slurm.
 tty=()
 [ -t 0 ] && [ -t 1 ] && tty=(-it)
+# shellcheck disable=SC2206 # PODMAN_ARGS is split into words on purpose
+extra=(${PODMAN_ARGS:-})
 
 exec podman run --rm ${tty[@]+"${tty[@]}"} \
   --name gpu-benchmark \
@@ -273,6 +278,7 @@ exec podman run --rm ${tty[@]+"${tty[@]}"} \
   --security-opt=label=disable \
   --shm-size="$SHM_SIZE" \
   "${mounts[@]}" \
+  ${extra[@]+"${extra[@]}"} \
   "$IMAGE" "$@"
 """
 

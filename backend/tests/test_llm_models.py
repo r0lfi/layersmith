@@ -440,6 +440,8 @@ def test_setup_restores_loads_installs_and_starts(client, hub, monkeypatch, tmp_
     calls = log.read_text()
     assert "podman load -i gpu-benchmark-1.0.0.tar" in calls
     assert f"-v {models_dir}:/models:ro" in calls and "--device nvidia.com/gpu=all" in calls
+    # Compiled kernels survive the --rm container.
+    assert f"-v {tmp_path / 'results' / '.cache'}:/cache" in calls and (tmp_path / "results" / ".cache").is_dir()
     assert (models_dir / model["name"] / "config.json").is_file()
     assert "NVIDIA H200" in result.stdout and "== 5/5 Ready" in result.stdout
     assert not list(transfer.glob("*.part-*"))  # removed once restored and verified
@@ -448,6 +450,10 @@ def test_setup_restores_loads_installs_and_starts(client, hub, monkeypatch, tmp_
                            capture_output=True, text=True, env=env, cwd=tmp_path)
     assert again.returncode == 0, again.stderr
     assert "already loaded" in again.stdout and "already installed" in again.stdout
+    extra = subprocess.run([BASH, str(transfer / "start_container.sh"), "gpu-bench", "info"], capture_output=True,
+                           text=True, env={**env, "PODMAN_ARGS": "-e A=1 -e B=2"}, cwd=tmp_path)
+    assert extra.returncode == 0, extra.stderr
+    assert f"-e A=1 -e B=2 {kit['image']} gpu-bench info" in log.read_text()
 
 
 @needs_shell

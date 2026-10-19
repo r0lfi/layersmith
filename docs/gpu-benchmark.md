@@ -75,8 +75,11 @@ the CDI spec with `sudo nvidia-ctk cdi generate` if it is missing, and starts
 the dashboard through `start_container.sh`. Every step is skipped once done,
 so it is safe to run again; `--no-start` only prepares, `--models-dir` and
 `TMPDIR=` move things to another disk. Start the dashboard again later with
-`bash start_container.sh` (`GPUS=0`, `MODELS_DIR=...`, or a `gpu-bench`
-command as arguments).
+`bash start_container.sh` (`GPUS=0`, `MODELS_DIR=...`, `PODMAN_ARGS="-e
+NAME=value"` for extra `podman run` options, or a `gpu-bench` command as
+arguments). Kernels that vLLM, FlashInfer and Triton compile on the first LLM
+run are kept in `$RESULTS_DIR/.cache` (`CACHE_DIR=` moves it), so later runs
+start faster.
 
 Only the image, without models or setup: **Download split archive** under
 Image archive and `./assemble-image.sh`; see [split-archive.md](split-archive.md).

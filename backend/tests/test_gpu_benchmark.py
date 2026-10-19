@@ -130,6 +130,15 @@ def test_containerfile_builds_mpi_and_single_node_nccl_tests_and_nvbandwidth():
     assert "GPU_BENCH_TOOLS=compute" in only_compute
 
 
+def test_flashinfer_jit_gets_the_wheel_headers_and_a_compile_check():
+    text, _, _ = _containerfile()
+    assert "site-packages/nvidia/*/include" in text and "cublas cublasLt curand nvrtc" in text
+    assert "#include <curand.h>" in text and "nvcc -c /tmp/jit-check.cu" in text
+    assert "FLASHINFER_WORKSPACE_BASE=/cache" in text
+    only_compute, _, _ = _containerfile(["compute"])
+    assert "jit-check" not in only_compute
+
+
 def test_generated_run_instructions_have_valid_shell_syntax():
     for tools in (None, ["compute"], ["nccl", "memory"]):
         text, _, _ = _containerfile(tools)

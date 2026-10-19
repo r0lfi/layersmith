@@ -108,6 +108,28 @@ def install_lines(recipe: dict) -> list[str]:
         "    && ln -sfn \"$(dirname \"$NCCL_INC\")\" /opt/nccl/include \\",
         "    && echo /opt/nccl/lib > /etc/ld.so.conf.d/gpu-bench-nccl.conf && ldconfig",
     ]
+    if "llm" in tools:
+        # FlashInfer (vLLM's sampler and kernels) compiles with /usr/local/cuda at
+        # runtime and needs cuRAND, cuBLAS and NVRTC headers beyond nvcc. The
+        # PyTorch wheels already ship them, matching the libraries PyTorch loads:
+        # link the missing ones into the toolkit and prove a compile works here,
+        # not first on an offline GPU host.
+        lines += [
+            f"RUN for inc in $(find {VENV}/lib -type d -path '*/site-packages/nvidia/*/include'); do \\",
+            "      for f in \"$inc\"/*; do \\",
+            "        [ -e \"/usr/local/cuda/include/${f##*/}\" ] || ln -s \"$f\" /usr/local/cuda/include/; \\",
+            "      done; \\",
+            "    done \\",
+            "    && for lib in cublas cublasLt curand nvrtc; do \\",
+            f"         so=\"$(find {VENV}/lib -name \"lib$lib.so.*\" | sort | head -n 1)\"; \\",
+            "         [ -n \"$so\" ] || { echo \"lib$lib is not in the PyTorch wheels\" >&2; exit 1; }; \\",
+            "         [ -e \"/usr/local/cuda/lib64/lib$lib.so\" ] || ln -s \"$so\" \"/usr/local/cuda/lib64/lib$lib.so\"; \\",
+            "       done \\",
+            "    && printf '#include <curand.h>\\n#include <curand_kernel.h>\\n#include <cublasLt.h>\\n#include <nvrtc.h>\\n"
+            "__global__ void k(curandStatePhilox4_32_10_t *s) { curand_init(0, 0, 0, s); }\\n' > /tmp/jit-check.cu \\",
+            "    && /usr/local/cuda/bin/nvcc -c /tmp/jit-check.cu -o /tmp/jit-check.o \\",
+            "    && rm -f /tmp/jit-check.cu /tmp/jit-check.o",
+        ]
     if "nccl" in tools:
         gencode = _gencode(recipe)
         lines += [
@@ -162,6 +184,7 @@ def install_lines(recipe: dict) -> list[str]:
         "    TRITON_CACHE_DIR=/cache/triton \\",
         "    TORCHINDUCTOR_CACHE_DIR=/cache/inductor \\",
         "    VLLM_CACHE_ROOT=/cache/vllm \\",
+        "    FLASHINFER_WORKSPACE_BASE=/cache \\",
         "    OMPI_ALLOW_RUN_AS_ROOT=1 \\",
         "    OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 \\",
         "    TERM=xterm-256color \\",
