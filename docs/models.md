@@ -99,6 +99,11 @@ Qwen3-8B.files.sha256                    sha256sum -c inside the model folder
 download-Qwen3-8B.sh                     fetches all of the above, resumable
 ```
 
+In the browser, **Download all** under the model's files saves the parts, the
+install script and both checksum lists into one folder (Chrome and Edge: a
+folder you choose, resumable by choosing it again; other browsers: the
+download folder). Copy that folder to the GPU host and run the install script.
+
 ## On the GPU host
 
 ```sh

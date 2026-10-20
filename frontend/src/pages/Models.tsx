@@ -1,6 +1,7 @@
 import { FormEvent, Fragment, useCallback, useState } from "react";
 import { api, BuildStatus, CatalogModel, DownloadFile, formatDecimalBytes, LlmModel } from "../api";
 import { Banner, Card, Empty, StatusPill, useLoad, usePoll } from "../components/ui";
+import { DownloadAllButton } from "../components/DownloadAll";
 
 const ACTIVE_MODEL = ["queued", "downloading", "verifying"];
 
@@ -34,9 +35,14 @@ function ModelFiles({ model }: { model: LlmModel }) {
         <span className="mono">/opt/models/{model.name}</span>. For the GPU benchmark image, the build page's
         GPU kit bundles models and image together.
       </p>
+      <div style={{ marginBottom: "0.8rem" }}>
+        {/* Everything the GPU host needs: parts, install script, checksum lists (not the download script). */}
+        <DownloadAllButton files={data.files.filter((file) => file.size !== undefined)}
+                           nextStep={`bash ${data.install.replace("./", "")}`} />
+      </div>
       <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
-        {script && <a className="button primary" href={script.url}>{script.name}</a>}
-        {data.files.filter((file) => file.kind !== "part").map((file) => (
+        {script && <a className="button" href={script.url}>{script.name}</a>}
+        {data.files.filter((file) => file.kind !== "part" && file !== script).map((file) => (
           <a key={file.name} className="button" href={file.url}>{file.name}</a>
         ))}
       </div>
