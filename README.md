@@ -247,8 +247,8 @@ carries the wheel and an offline archive with every dependency for Python
 3.9-3.13; it is not on PyPI. On the client machine:
 
 ```bash
-curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.8.4/layersmith-client-0.8.4-offline.tar.gz
-tar -xzf layersmith-client-0.8.4-offline.tar.gz && cd layersmith-client-0.8.4-offline
+curl -LO https://github.com/r0lfi/layersmith/releases/download/v0.8.5/layersmith-client-0.8.5-offline.tar.gz
+tar -xzf layersmith-client-0.8.5-offline.tar.gz && cd layersmith-client-0.8.5-offline
 sha256sum -c SHA256SUMS
 pipx install --pip-args="--no-index --find-links=$PWD/wheelhouse" layersmith-client
 layersmith config set server https://layersmith.example.org
@@ -271,7 +271,7 @@ The documentation keeps these apart, and so should you:
 
 | Tag | Meaning |
 | --- | --- |
-| `0.8.4` | an exact release — **recommended for production** |
+| `0.8.5` | an exact release — **recommended for production** |
 | `0.2`, `0` | newest patch within that minor/major line |
 | `latest` | newest stable release |
 | `edge` | built from `main` on every merge; development, not stable |
@@ -279,7 +279,7 @@ The documentation keeps these apart, and so should you:
 ```yaml
 services:
   layersmith:
-    image: ghcr.io/r0lfi/layersmith:0.8.4
+    image: ghcr.io/r0lfi/layersmith:0.8.5
 ```
 
 Prereleases (`v0.2.0-rc1`) publish only their exact tag; they never move
