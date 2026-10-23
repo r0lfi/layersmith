@@ -963,7 +963,7 @@ def llm_model_files(model_id: str, request: Request, state=Depends(get_state)):
         script = f"download-{model.name}.sh"
         files.append({"name": script, "kind": "script", "url": f"/api/llm-models/{model.id}/files/{script}"})
         return {"model": _model_json(model, state["model_service"]), "files": files,
-                "install": f"./{llm_models.install_script_name(model.name)} --dir /opt/models"}
+                "install": f"./{llm_models.install_script_name(model.name)} --dir /opt/gpu_benchmark/models"}
 
 
 @router.get("/llm-models/{model_id}/files/{filename}")

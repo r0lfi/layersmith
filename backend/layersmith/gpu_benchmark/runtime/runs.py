@@ -39,7 +39,7 @@ def new_run(root: str | Path, info: dict, label: str | None = None) -> Path:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise RunError(f"Cannot create the results directory {root}: {exc}. "
-                       "Mount a writable host directory, for example -v /opt/gpu-results:/results:Z") from exc
+                       "Mount a writable host directory, for example -v /opt/gpu_benchmark/results:/results:Z") from exc
     if not os.access(root, os.W_OK):
         raise RunError(f"The results directory {root} is not writable. Check the volume mount and SELinux label.")
     stamp = dt.datetime.now().strftime("%Y-%m-%d_%H%M%S")

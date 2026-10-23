@@ -196,7 +196,7 @@ Image (.tar)** with its SHA-256. On the GPU server:
 ```sh
 podman load -i gpu-benchmark-1.0.0.tar
 podman run --rm -it --device nvidia.com/gpu=all --security-opt=label=disable --shm-size=16g \
-  -v /models:/models:ro -v /opt/gpu-results:/results localhost/gpu-benchmark:1.0.0
+  -v /models:/models:ro -v /opt/gpu_benchmark/results:/results localhost/gpu-benchmark:1.0.0
 ```
 
 The terminal dashboard starts and runs every benchmark against the GPUs and

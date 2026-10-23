@@ -32,7 +32,7 @@ function ModelFiles({ model }: { model: LlmModel }) {
         {parts.length} part{parts.length === 1 ? "" : "s"} under 1 GB plus an install script. On a machine that
         can reach LayerSmith, <span className="mono">{script?.name}</span> fetches and verifies them all; on the
         GPU host <span className="mono">bash {data.install.replace("./", "")}</span> puts the model in{" "}
-        <span className="mono">/opt/models/{model.name}</span>. For the GPU benchmark image, the build page's
+        <span className="mono">/opt/gpu_benchmark/models/{model.name}</span>. For the GPU benchmark image, the build page's
         GPU kit bundles models and image together.
       </p>
       <div style={{ marginBottom: "0.8rem" }}>

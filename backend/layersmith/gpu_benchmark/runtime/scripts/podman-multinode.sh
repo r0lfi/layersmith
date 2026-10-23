@@ -9,7 +9,7 @@
 # Needs rootful Podman for RDMA (memlock), NVIDIA CDI, and /dev/infiniband.
 set -eu
 IMAGE="${IMAGE:-localhost/gpu-benchmark:1.0.0}"
-RESULTS="${RESULTS:-/opt/gpu-results}"
+RESULTS="${RESULTS:-/opt/gpu_benchmark/results}"
 mkdir -p "$RESULTS"
 RDMA=""
 [ -d /dev/infiniband ] && RDMA="--device /dev/infiniband"

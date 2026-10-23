@@ -2,8 +2,8 @@
 # Copy every node's run folders to this machine and compare them.
 #   ./collect-results.sh node1 node2 node3
 set -eu
-DEST="${DEST:-/opt/gpu-results}"
-REMOTE="${REMOTE:-/opt/gpu-results}"
+DEST="${DEST:-/opt/gpu_benchmark/results}"
+REMOTE="${REMOTE:-/opt/gpu_benchmark/results}"
 IMAGE="${IMAGE:-localhost/gpu-benchmark:1.0.0}"
 for node in "$@"; do
   echo "== $node"

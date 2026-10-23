@@ -12,7 +12,7 @@
 #SBATCH --output=gpu-bench-full-%j-%N.out
 set -euo pipefail
 export IMAGE="${IMAGE:-localhost/gpu-benchmark:1.0.0}"
-export RESULTS="${RESULTS:-/opt/gpu-results}"
+export RESULTS="${RESULTS:-/opt/gpu_benchmark/results}"
 export MODELS="${MODELS:-/models}"
 export MODEL="${MODEL:-}"
 srun --ntasks-per-node=1 bash -c '

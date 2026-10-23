@@ -233,7 +233,7 @@ export default function GpuBenchmarkWizard({ onLeave }: { onLeave: () => void })
               Models are not built into the image (it stays the same size); LayerSmith downloads the ones you tick
               from Hugging Face while the image builds, and the build page's <strong>GPU kit</strong> hands them over
               with the image in parts under 1 GB. <span className="mono">setup.sh</span> installs them into{" "}
-              <span className="mono">/opt/models</span> on the GPU host. More on the <Link to="/models">Models page</Link>.
+              <span className="mono">/opt/gpu_benchmark/models</span> on the GPU host. More on the <Link to="/models">Models page</Link>.
             </p>
             <table className="table">
               <tbody>

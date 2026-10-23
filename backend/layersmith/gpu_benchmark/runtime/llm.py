@@ -38,6 +38,37 @@ SERVED_NAME = "gpu-bench"
 PRECISIONS = {"auto": "auto", "float16": "float16", "fp16": "float16", "bfloat16": "bfloat16",
               "bf16": "bfloat16", "float32": "float32", "fp32": "float32"}
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+# Headers FlashInfer's runtime (JIT) kernels include beyond nvcc's own.
+JIT_HEADERS = ("curand.h", "cublasLt.h", "nvrtc.h", "cuda_fp8.h")
+
+
+def jit_include_env(environ: dict | None = None, site_dirs: list[str] | None = None) -> dict:
+    """FLASHINFER_EXTRA_CUDAFLAGS/CFLAGS pointing at the CUDA headers in the PyTorch wheels.
+
+    FlashInfer compiles kernels on first use (sampler, FP8 GEMM, all-reduce
+    fusion with tensor parallelism) and only looks in /usr/local/cuda. The
+    wheels ship the headers that match the libraries PyTorch loads, so they
+    are added with -isystem. Flags already set are kept; a directory is
+    never added twice.
+    """
+    import site
+    import sysconfig
+
+    environ = os.environ if environ is None else environ
+    if site_dirs is None:
+        site_dirs = list(dict.fromkeys([sysconfig.get_paths()["purelib"], *site.getsitepackages()]))
+    includes = []
+    for base in site_dirs:
+        for directory in sorted(Path(base).glob("nvidia/*/include")):
+            if any((directory / header).exists() for header in JIT_HEADERS) and str(directory) not in includes:
+                includes.append(str(directory))
+    env = {}
+    for key in ("FLASHINFER_EXTRA_CUDAFLAGS", "FLASHINFER_EXTRA_CFLAGS"):
+        current = environ.get(key, "")
+        extra = [f"-isystem {d}" for d in includes if d not in current.split()]
+        if extra:
+            env[key] = " ".join(filter(None, [current, *extra]))
+    return env
 
 
 # --------------------------------------------------------------- models
@@ -162,6 +193,7 @@ class VllmServer:
         self.env = dict(os.environ, CUDA_VISIBLE_DEVICES=visible_devices_env(devices),
                         HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_DATASETS_OFFLINE="1",
                         HF_HUB_DISABLE_TELEMETRY="1", VLLM_NO_USAGE_STATS="1", DO_NOT_TRACK="1")
+        self.env.update(jit_include_env(self.env))
         self._follow_stop = threading.Event()
 
     def _follow_log(self) -> None:

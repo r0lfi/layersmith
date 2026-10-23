@@ -404,14 +404,15 @@ def test_kit_lists_image_parts_model_parts_and_scripts(client, hub, monkeypatch)
 def fake_tools(directory: Path, log: Path, image: str) -> dict:
     """podman, nvidia-ctk and nvidia-smi stand-ins that record what they were asked."""
     directory.mkdir()
-    state = directory / "loaded"
+    state = directory / "loaded"  # holds the id of the image podman has
     (directory / "podman").write_text(f"""#!/bin/sh
 echo "podman $*" >> {log}
 case "$1 $2" in
+  "container exists") exit 1 ;;
   "image exists") [ -f {state} ] ;;
-  "image inspect") echo sha256:{'b' * 64} ;;
+  "image inspect") cat {state} ;;
   "info --format") echo {directory}/store ;;
-  "load -i") touch {state} ;;
+  "load -i") echo sha256:{'b' * 64} > {state} ;;
   *) exit 0 ;;
 esac
 """)
@@ -432,7 +433,8 @@ def test_setup_restores_loads_installs_and_starts(client, hub, monkeypatch, tmp_
     transfer = fetch_all(client, [f for f in kit["files"] if f["name"] != "download-all.sh"], tmp_path / "kit")
     log = tmp_path / "podman.log"
     env = {**fake_tools(tmp_path / "bin", log, kit["image"]), "TMPDIR": str(tmp_path),
-           "RESULTS_DIR": str(tmp_path / "results")}
+           "RESULTS_DIR": str(tmp_path / "results"), "GPU_BENCH_DIR": str(tmp_path / "gpu_benchmark"),
+           **no_legacy(tmp_path)}
     models_dir = tmp_path / "models"
     result = subprocess.run([BASH, str(transfer / "setup.sh"), "--models-dir", str(models_dir)],
                             capture_output=True, text=True, env=env, cwd=tmp_path, stdin=subprocess.DEVNULL)
@@ -441,9 +443,10 @@ def test_setup_restores_loads_installs_and_starts(client, hub, monkeypatch, tmp_
     assert "podman load -i gpu-benchmark-1.0.0.tar" in calls
     assert f"-v {models_dir}:/models:ro" in calls and "--device nvidia.com/gpu=all" in calls
     # Compiled kernels survive the --rm container.
-    assert f"-v {tmp_path / 'results' / '.cache'}:/cache" in calls and (tmp_path / "results" / ".cache").is_dir()
+    cache = tmp_path / "gpu_benchmark" / "cache"
+    assert f"-v {cache}:/cache" in calls and cache.is_dir()
     assert (models_dir / model["name"] / "config.json").is_file()
-    assert "NVIDIA H200" in result.stdout and "== 5/5 Ready" in result.stdout
+    assert "NVIDIA H200" in result.stdout and "== Ready" in result.stdout and "first install" in result.stdout
     assert not list(transfer.glob("*.part-*"))  # removed once restored and verified
     # Running it again finds everything done.
     again = subprocess.run([BASH, str(transfer / "setup.sh"), "--models-dir", str(models_dir), "--no-start"],
@@ -456,6 +459,81 @@ def test_setup_restores_loads_installs_and_starts(client, hub, monkeypatch, tmp_
     assert f"-e A=1 -e B=2 {kit['image']} gpu-bench info" in log.read_text()
 
 
+def no_legacy(tmp_path: Path) -> dict:
+    """Old-layout folders inside the test directory, never the real /opt."""
+    return {"LEGACY_MODELS_DIR": str(tmp_path / "legacy-models"), "LEGACY_RESULTS_DIR": str(tmp_path / "legacy-results")}
+
+
+def software_kit(client, monkeypatch, tmp_path: Path) -> tuple[dict, Path]:
+    build_id = gpu_build(client, monkeypatch, int(1.5 * PART))
+    client.state["split_service"].run(build_id)
+    kit = client.get(f"/api/builds/{build_id}/kit").json()
+    assert kit["ready"] and kit["models"] == []
+    return kit, fetch_all(client, [f for f in kit["files"] if f["name"] != "download-all.sh"], tmp_path / "kit")
+
+
+@needs_shell
+def test_setup_moves_an_old_layout_into_one_folder(client, hub, monkeypatch, tmp_path):
+    kit, transfer = software_kit(client, monkeypatch, tmp_path)
+    assert "none in this kit (software only)" in (transfer / "setup.sh").read_text()
+    legacy = no_legacy(tmp_path)
+    old_models, old_results = Path(legacy["LEGACY_MODELS_DIR"]), Path(legacy["LEGACY_RESULTS_DIR"])
+    (old_models / "Qwen3-8B").mkdir(parents=True)
+    (old_models / "Qwen3-8B" / "config.json").write_text("{}")
+    (old_results / "run-1").mkdir(parents=True)
+    (old_results / ".cache" / "flashinfer").mkdir(parents=True)
+    log = tmp_path / "podman.log"
+    base = tmp_path / "gpu_benchmark"
+    env = {**fake_tools(tmp_path / "bin", log, kit["image"]), "TMPDIR": str(tmp_path), "GPU_BENCH_DIR": str(base),
+           **legacy}
+    result = subprocess.run([BASH, str(transfer / "setup.sh")], capture_output=True, text=True, env=env,
+                            cwd=tmp_path, stdin=subprocess.DEVNULL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Renamed, not copied; the models already there are listed and mounted.
+    assert not old_models.exists() and not old_results.exists()
+    assert (base / "models" / "Qwen3-8B" / "config.json").is_file() and (base / "results" / "run-1").is_dir()
+    assert (base / "cache" / "flashinfer").is_dir() and not (base / "results" / ".cache").exists()
+    assert "/models/Qwen3-8B" in result.stdout and "none in this kit (software only)" in result.stdout
+    state = (base / "installed.env").read_text()
+    assert f"IMAGE={kit['image']}" in state and "IMAGE_ID=sha256:" + "b" * 64 in state
+    assert f"MODELS_DIR={base / 'models'}" in state
+    calls = log.read_text()
+    assert f"-v {base / 'models'}:/models:ro" in calls and f"-v {base / 'results'}:/results" in calls
+    # The host copy starts the same container from anywhere, with the recorded folders.
+    assert (base / "start_container.sh").is_file()
+    env_plain = {k: v for k, v in env.items() if k != "GPU_BENCH_DIR"}
+    again = subprocess.run([BASH, str(base / "start_container.sh"), "gpu-bench", "info"], capture_output=True,
+                           text=True, env=env_plain, cwd="/")
+    assert again.returncode == 0, again.stderr
+    assert log.read_text().count(f"-v {base / 'cache'}:/cache") == 2
+
+
+@needs_shell
+def test_setup_updates_an_installed_image_and_keeps_models(client, hub, monkeypatch, tmp_path):
+    kit, transfer = software_kit(client, monkeypatch, tmp_path)
+    log = tmp_path / "podman.log"
+    env = {**fake_tools(tmp_path / "bin", log, kit["image"]), "TMPDIR": str(tmp_path),
+           "GPU_BENCH_DIR": str(tmp_path / "gb"), **no_legacy(tmp_path)}
+    # An older build of the same image, loaded by a kit without setup state.
+    (tmp_path / "bin" / "loaded").write_text("sha256:" + "a" * 64 + "\n")
+    (tmp_path / "gb" / "models" / "Llama").mkdir(parents=True)
+    (tmp_path / "gb" / "models" / "Llama" / "config.json").write_text("{}")
+    result = subprocess.run([BASH, str(transfer / "setup.sh"), "--no-start"], capture_output=True, text=True,
+                            env=env, cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "installed without setup.sh state" in result.stdout
+    assert f"Updated: {kit['image']} ({'a' * 12}) -> {kit['image']} ({'b' * 12})" in result.stdout
+    calls = log.read_text()
+    assert "podman load -i" in calls and f"podman rmi {'a' * 64}" in calls
+    assert (tmp_path / "gb" / "models" / "Llama" / "config.json").is_file()
+    # A running dashboard is never pulled out from under the user.
+    busy = tmp_path / "bin" / "podman"
+    busy.write_text(busy.read_text().replace('"container exists") exit 1', '"container exists") exit 0'))
+    blocked = subprocess.run([BASH, str(transfer / "setup.sh"), "--no-start"], capture_output=True, text=True,
+                             env=env, cwd=tmp_path)
+    assert blocked.returncode == 8 and "stop it first" in blocked.stderr
+
+
 @needs_shell
 def test_setup_stops_when_the_disk_is_too_small(client, hub, monkeypatch, tmp_path):
     build_id = gpu_build(client, monkeypatch, int(1.5 * PART))
@@ -465,9 +543,10 @@ def test_setup_stops_when_the_disk_is_too_small(client, hub, monkeypatch, tmp_pa
     client.state["split_service"].run(build_id)
     kit = client.get(f"/api/builds/{build_id}/kit").json()
     transfer = fetch_all(client, [f for f in kit["files"] if f["name"] != "download-all.sh"], tmp_path / "kit")
-    env = {**fake_tools(tmp_path / "bin", tmp_path / "log", kit["image"]), "TMPDIR": str(tmp_path)}
-    result = subprocess.run([BASH, str(transfer / "setup.sh"), "--no-start"], capture_output=True, text=True,
-                            env=env, cwd=tmp_path)
+    env = {**fake_tools(tmp_path / "bin", tmp_path / "log", kit["image"]), "TMPDIR": str(tmp_path),
+           **no_legacy(tmp_path)}
+    result = subprocess.run([BASH, str(transfer / "setup.sh"), "--no-start", "--dir", str(tmp_path / "gb")],
+                            capture_output=True, text=True, env=env, cwd=tmp_path)
     assert result.returncode == 4 and "NOT ENOUGH" in result.stdout and "Not enough disk space" in result.stderr
     assert sorted(transfer.glob("*.part-*"))  # nothing touched
 

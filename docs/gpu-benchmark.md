@@ -30,18 +30,18 @@ nvidia-ctk cdi list              # must list nvidia.com/gpu=all
 sha256sum -c gpu-benchmark-1.0.0.tar.sha256
 podman load -i gpu-benchmark-1.0.0.tar
 podman images                    # localhost/gpu-benchmark  1.0.0
-sudo mkdir -p /opt/gpu-results /opt/models
+sudo mkdir -p /opt/gpu_benchmark/results /opt/gpu_benchmark/models
 
 podman run --rm -it \
   --device nvidia.com/gpu=all \
   --security-opt=label=disable \
   --shm-size=16g \
-  -v /opt/models:/models:ro \
-  -v /opt/gpu-results:/results \
+  -v /opt/gpu_benchmark/models:/models:ro \
+  -v /opt/gpu_benchmark/results:/results \
   localhost/gpu-benchmark:1.0.0
 ```
 
-The dashboard starts automatically. Results land in `/opt/gpu-results` on the
+The dashboard starts automatically. Results land in `/opt/gpu_benchmark/results` on the
 host, one folder per run.
 
 The archive is written with `podman save --format oci-archive`: the whole
@@ -70,16 +70,35 @@ When files over 1 GB cannot be moved, or you want models along, use the
 
 `setup.sh` checks the host and the free space per disk (archive, podman's
 scratch space in `$TMPDIR`, the image store, the models directory), restores
-and loads the image, installs each model into `/opt/models/<name>`, generates
-the CDI spec with `sudo nvidia-ctk cdi generate` if it is missing, and starts
-the dashboard through `start_container.sh`. Every step is skipped once done,
-so it is safe to run again; `--no-start` only prepares, `--models-dir` and
-`TMPDIR=` move things to another disk. Start the dashboard again later with
-`bash start_container.sh` (`GPUS=0`, `MODELS_DIR=...`, `PODMAN_ARGS="-e
-NAME=value"` for extra `podman run` options, or a `gpu-bench` command as
-arguments). Kernels that vLLM, FlashInfer and Triton compile on the first LLM
-run are kept in `$RESULTS_DIR/.cache` (`CACHE_DIR=` moves it), so later runs
-start faster.
+and loads the image, installs each model of the kit, generates the CDI spec
+with `sudo nvidia-ctk cdi generate` if it is missing, and starts the
+dashboard. Every step is skipped once done, so it is safe to run again;
+`--no-start` only prepares, `--dir`, `--models-dir` and `TMPDIR=` move things
+to another disk.
+
+Everything on the GPU host lives in one folder:
+
+```
+/opt/gpu_benchmark/
+  models/              one Hugging Face folder per model (/models, read-only)
+  results/             one folder per run (/results)
+  cache/               kernels vLLM, FlashInfer and Triton compile (/cache)
+  start_container.sh   start the dashboard again later
+  installed.env        which image is installed, from which LayerSmith version
+```
+
+Start the dashboard again with `/opt/gpu_benchmark/start_container.sh`
+(`GPUS=0`, `PODMAN_ARGS="-e NAME=value"` for extra `podman run` options, or a
+`gpu-bench` command as arguments).
+
+**Updating.** Build a new GPU benchmark image in LayerSmith, choose
+**Software only** in the GPU kit (image and scripts, no models), carry the
+kit over and run `bash setup.sh` again. It reads `installed.env`, loads the
+new image, removes the one it replaces (`--keep-old-image` keeps it),
+refreshes `start_container.sh` and keeps every model and result. Kits from
+before LayerSmith 0.9 used `/opt/models` and `/opt/gpu-results`: `setup.sh`
+moves those into `/opt/gpu_benchmark` (a rename on the same disk, nothing is
+copied; `--no-migrate` leaves them). Stop a running dashboard first.
 
 Only the image, without models or setup: **Download split archive** under
 Image archive and `./assemble-image.sh`; see [split-archive.md](split-archive.md).
@@ -242,7 +261,7 @@ podman run --rm -it --network=host --ipc=host \
   --device nvidia.com/gpu=all --device /dev/infiniband \
   --ulimit memlock=-1:-1 --cap-add=IPC_LOCK \
   --security-opt=label=disable --shm-size=16g \
-  -v /opt/gpu-results:/results localhost/gpu-benchmark:1.0.0
+  -v /opt/gpu_benchmark/results:/results localhost/gpu-benchmark:1.0.0
 ```
 
 - `--network=host`: NCCL bootstrap and RoCE need the host's interfaces and GIDs.
@@ -305,7 +324,7 @@ NNODES=2 NODE_RANK=1 MASTER_ADDR=node1 ./podman-multinode.sh --max-bytes 8G
 ```
 
 With Slurm: `sbatch --nodes=2 slurm-dist-nccl.sbatch` (load the image on every
-node first). Only rank 0 writes results, into node 0's `/opt/gpu-results`.
+node first). Only rank 0 writes results, into node 0's `/opt/gpu_benchmark/results`.
 The dashboard's page 6 starts the local node's torchrun and shows the command
 for the other nodes.
 
@@ -365,7 +384,7 @@ without the dashboard:
 
 ```sh
 podman run --rm --device nvidia.com/gpu=all --security-opt=label=disable --shm-size=16g \
-  -v /opt/models:/models:ro -v /opt/gpu-results:/results localhost/gpu-benchmark:1.0.0 \
+  -v /opt/gpu_benchmark/models:/models:ro -v /opt/gpu_benchmark/results:/results localhost/gpu-benchmark:1.0.0 \
   gpu-bench full --model /models/<model>
 ```
 
@@ -382,13 +401,14 @@ compiles on first use are compiled locally (nvcc is in the image) into
 
 | Symptom | Cause / fix |
 |---|---|
+| vLLM: `Ninja build failed` or `curand.h: No such file` | A FlashInfer kernel compiled at run time misses CUDA headers. Images from LayerSmith 0.9 pass the headers from the PyTorch wheels to FlashInfer themselves; for an older image rebuild it, or pass `FLASHINFER_EXTRA_CUDAFLAGS`/`FLASHINFER_EXTRA_CFLAGS=-isystem <venv>/lib/python3.*/site-packages/nvidia/cu13/include` with `PODMAN_ARGS="--env-file ..."`. |
 | `No NVIDIA GPU is visible` | Missing `--device nvidia.com/gpu=all`, or no CDI spec: `nvidia-ctk cdi generate`. |
 | `CUDA driver compatibility: FAIL` | Host driver older than the image needs; use the CUDA 12.8 image or upgrade the host driver. |
 | TUI does not start | Add `-it`. Over SSH make sure the terminal is at least 80×24. |
-| Results folder read-only | Create `/opt/gpu-results` on the host; with SELinux use `--security-opt=label=disable` or `:Z`. |
+| Results folder read-only | Create `/opt/gpu_benchmark/results` on the host; with SELinux use `--security-opt=label=disable` or `:Z`. |
 | vLLM runs out of memory | Lower `--gpu-memory-utilization`, use more GPUs (`--tensor-parallel-size`), or shorter `--max-model-len`. |
 | NCCL uses TCP sockets | `--device /dev/infiniband`, `--network=host`, memlock, `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`; check with `check-rdma.sh`. |
 | `/dev/shm` warning | Use `--shm-size=16g` (or `--ipc=host`). |
-| `statfs /models: no such file or directory` | The host folder in `-v <host>:/models:ro` does not exist: `sudo mkdir -p /opt/models`, or drop that `-v` to run without models. `start_container.sh` skips the mount when the folder is missing. |
+| `statfs /models: no such file or directory` | The host folder in `-v <host>:/models:ro` does not exist: `sudo mkdir -p /opt/gpu_benchmark/models`, or drop that `-v` to run without models. `start_container.sh` skips the mount when the folder is missing. |
 | `unresolvable CDI devices nvidia.com/gpu=all` | No CDI spec: `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (needs the NVIDIA Container Toolkit and a working `nvidia-smi`). `setup.sh` does this for you. |
 | `podman load`: `no space left on device` | The archive is fine; the image store or `$TMPDIR` is full. Free space, `TMPDIR=/bigdisk/tmp podman load ...`, or move `graphroot` in `storage.conf`. `setup.sh` checks this before it starts. |

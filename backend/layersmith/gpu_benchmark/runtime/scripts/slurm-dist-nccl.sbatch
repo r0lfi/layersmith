@@ -14,7 +14,7 @@
 #SBATCH --output=gpu-bench-nccl-%j.out
 set -euo pipefail
 export IMAGE="${IMAGE:-localhost/gpu-benchmark:1.0.0}"
-export RESULTS="${RESULTS:-/opt/gpu-results}"
+export RESULTS="${RESULTS:-/opt/gpu_benchmark/results}"
 export MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
 export MASTER_PORT="${MASTER_PORT:-29500}"
 export NNODES="$SLURM_NNODES"

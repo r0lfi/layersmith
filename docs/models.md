@@ -10,7 +10,7 @@ those models onto a GPU host that has no network and may refuse files of
 2. It hands the model over as parts of at most 900 MB plus an
    `install-<model>.sh`.
 3. On the GPU host the script checks the parts, unpacks the model into
-   `/opt/models/<model>` and checks every file again. The container sees it
+   `/opt/gpu_benchmark/models/<model>` and checks every file again. The container sees it
    as `/models/<model>`.
 
 The GPU benchmark wizard has the same list as an **LLM models** card: the
@@ -107,7 +107,7 @@ download folder). Copy that folder to the GPU host and run the install script.
 ## On the GPU host
 
 ```sh
-bash install-Qwen3-8B.sh                   # into /opt/models (or $MODELS_DIR)
+bash install-Qwen3-8B.sh                   # into /opt/gpu_benchmark/models (or $MODELS_DIR)
 bash install-Qwen3-8B.sh --dir /data/models --remove-parts
 ```
 
@@ -129,8 +129,8 @@ By hand, without the script:
 
 ```sh
 sha256sum -c Qwen3-8B.parts.sha256
-cat Qwen3-8B.model.tar.part-* | tar -xf - -C /opt/models
-(cd /opt/models/Qwen3-8B && sha256sum -c "$OLDPWD/Qwen3-8B.files.sha256")
+cat Qwen3-8B.model.tar.part-* | tar -xf - -C /opt/gpu_benchmark/models
+(cd /opt/gpu_benchmark/models/Qwen3-8B && sha256sum -c "$OLDPWD/Qwen3-8B.files.sha256")
 ```
 
 ## Configuration

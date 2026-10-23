@@ -362,7 +362,7 @@ def health_checks(info: dict | None = None) -> dict:
     results = Path(os.environ.get("GPU_BENCH_RESULTS", "/results"))
     writable = results.is_dir() and os.access(results, os.W_OK)
     add("Results directory", "PASS" if writable else "WARN",
-        f"{results} is writable" if writable else f"{results} is missing or read-only; mount -v /opt/gpu-results:/results:Z")
+        f"{results} is writable" if writable else f"{results} is missing or read-only; mount -v /opt/gpu_benchmark/results:/results:Z")
     status = "FAIL" if any(check["status"] == "FAIL" for check in checks) else "PASS"
     return {"status": status, "checks": checks}
 

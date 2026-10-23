@@ -13,6 +13,9 @@ export function GpuKit({ buildId }: { buildId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [showFiles, setShowFiles] = useState(false);
   const [preselected, setPreselected] = useState(false);
+  // Software only: image and scripts for a host that already has its models (updates).
+  const [softwareOnly, setSoftwareOnly] = useState(false);
+  const selected = softwareOnly ? [] : chosen;
 
   useEffect(() => {
     api.llmModels().then((all) => setModels(all.filter((model) => model.status === "ready")))
@@ -20,7 +23,7 @@ export function GpuKit({ buildId }: { buildId: string }) {
   }, []);
 
   function load() {
-    api.gpuKit(buildId, chosen).then((value) => {
+    api.gpuKit(buildId, selected).then((value) => {
       setKit(value);
       // Models picked in the wizard are ticked once, as soon as they are downloaded.
       if (!preselected && value.suggested.length) {
@@ -29,7 +32,7 @@ export function GpuKit({ buildId }: { buildId: string }) {
       }
     }).catch((exc) => setError((exc as Error).message));
   }
-  useEffect(load, [buildId, chosen.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [buildId, selected.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   usePoll(load, kit?.image_split === "running" || Boolean(kit?.pending.some((p) => p.status !== "failed")), 3000);
 
   async function prepareImage() {
@@ -53,13 +56,27 @@ export function GpuKit({ buildId }: { buildId: string }) {
         <p className="faint" style={{ marginTop: 0 }}>
           For a GPU host without network access and a transfer limit under 1 GB: the image and the chosen models
           in parts of at most 900 MB, plus <span className="mono">setup.sh</span>, which checks disk space, restores
-          and loads the image, installs the models in <span className="mono">/opt/models</span>, checks the NVIDIA
-          Container Toolkit and starts the dashboard.
+          and loads the image, installs the models, checks the NVIDIA Container Toolkit and starts the dashboard.
+          Everything on the GPU host goes into <span className="mono">/opt/gpu_benchmark</span> (models, results,
+          cache). Running a newer kit's <span className="mono">setup.sh</span> updates an installed one: it
+          replaces the image and keeps models and results.
         </p>
         {error && <Banner>{error}</Banner>}
 
-        <h3>1. Models</h3>
-        {models.length === 0 ? (
+        <h3>1. What to download</h3>
+        <div className="row" style={{ gap: "0.4rem 1.2rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+          <label className="check">
+            <input type="radio" name="kit-mode" checked={!softwareOnly} onChange={() => setSoftwareOnly(false)} />
+            <span>Software and models</span>
+          </label>
+          <label className="check">
+            <input type="radio" name="kit-mode" checked={softwareOnly} onChange={() => setSoftwareOnly(true)} />
+            <span>Software only <span className="faint">— image and scripts, for an update or a host that has its models</span></span>
+          </label>
+        </div>
+        {softwareOnly ? (
+          <p className="faint">No models in this kit. Models already on the GPU host are kept.</p>
+        ) : models.length === 0 ? (
           <p className="faint">
             No downloaded models yet — <Link to="/models">download some on the Models page</Link>. The kit works
             without models too (GPU compute, memory and NCCL tests).
@@ -75,7 +92,7 @@ export function GpuKit({ buildId }: { buildId: string }) {
           </div>
         )}
 
-        {kit && kit.pending.length > 0 && (
+        {!softwareOnly && kit && kit.pending.length > 0 && (
           <p className="faint">
             Chosen for this image, not ready yet:{" "}
             {kit.pending.map((item) => `${item.name} (${item.status})`).join(", ")}. They are ticked here when their
@@ -130,9 +147,9 @@ mkdir gpu-kit && cd gpu-kit
 bash ~/Downloads/download-all.sh
 
 # copy the gpu-kit directory to the GPU host, then there:
-bash setup.sh                 # check, load, install models, start the dashboard
+bash setup.sh                 # install or update, start the dashboard
 bash setup.sh --no-start      # ... or only prepare
-bash start_container.sh       # start again later`}</pre>
+/opt/gpu_benchmark/start_container.sh   # start again later`}</pre>
           </>
         )}
       </Card>

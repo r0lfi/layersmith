@@ -16,7 +16,7 @@
 #SBATCH --output=gpu-bench-nccl-mpi-%j.out
 set -euo pipefail
 SQSH="${SQSH:-$PWD/gpu-benchmark.sqsh}"
-RESULTS="${RESULTS:-/opt/gpu-results}"
+RESULTS="${RESULTS:-/opt/gpu_benchmark/results}"
 # export NCCL_IB_HCA=mlx5_0,mlx5_1 NCCL_SOCKET_IFNAME=ens1f0np0 NCCL_IB_GID_INDEX=3
 srun --mpi=pmix --container-image="$SQSH" --container-mounts="$RESULTS:/results" \
   bash -c 'export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID; gpu-bench nccl --test all_reduce,all_gather,reduce_scatter --max-bytes 8G --gpus-per-rank 1 --label mpi-$SLURM_NNODES-nodes'

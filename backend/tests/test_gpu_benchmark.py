@@ -168,6 +168,22 @@ def test_cuda_12_variant_installs_torch_from_its_own_index_without_vllm():
 
 # ------------------------------------------------------ LayerSmith glue
 
+def test_vllm_gets_the_wheel_cuda_headers_for_flashinfer_jit(tmp_path):
+    """Ninja build failed on an H200 host until -isystem pointed at nvidia/cu13/include."""
+    site = tmp_path / "site-packages"
+    (site / "nvidia" / "cu13" / "include").mkdir(parents=True)
+    (site / "nvidia" / "cu13" / "include" / "curand.h").write_text("")
+    (site / "nvidia" / "cudnn" / "include").mkdir(parents=True)  # no JIT headers: left out
+    cu13 = str(site / "nvidia" / "cu13" / "include")
+    env = llm.jit_include_env({}, [str(site)])
+    assert env == {"FLASHINFER_EXTRA_CUDAFLAGS": f"-isystem {cu13}", "FLASHINFER_EXTRA_CFLAGS": f"-isystem {cu13}"}
+    # Flags someone already set are kept, and the directory is not added twice.
+    kept = llm.jit_include_env({"FLASHINFER_EXTRA_CUDAFLAGS": "-O3", "FLASHINFER_EXTRA_CFLAGS": f"-isystem {cu13}"},
+                               [str(site)])
+    assert kept == {"FLASHINFER_EXTRA_CUDAFLAGS": f"-O3 -isystem {cu13}"}
+    assert llm.jit_include_env({}, [str(tmp_path / "missing")]) == {}
+
+
 def test_build_context_has_runtime_package_scripts_and_airgap_files(env, monkeypatch):
     monkeypatch.setenv("LAYERSMITH_GPU_MIN_FREE_GB", "0")
     build_id = make_build(env, {"gpu_benchmark": {"tools": ["compute", "memory"]}})
