@@ -110,6 +110,14 @@ and shows you the Containerfile it produced before anything is built.
   and CPU dataset preparation. Hash-locked Python stacks, checks run inside the
   image after each build (dependencies, CPU smoke test, offline example), and
   a Getting started for the exact image. See [docs/training.md](docs/training.md).
+- **AI / ML / GPU images** — NVIDIA PyTorch (NGC 26.09, CUDA 13.4.1), NVIDIA
+  CUDA, vLLM, TensorFlow GPU or any base: import the upstream image unchanged
+  or add Python tools without pip replacing the base image's framework builds.
+  A basic test runs inside every image, GPU compatibility is graded against
+  the driver and the GPU architectures the kernels were compiled for, the
+  export carries a CycloneDX SBOM and package list, and the build page
+  generates Slurm batch scripts that give Podman exactly the GPUs Slurm
+  allocated. See [docs/ai-ml.md](docs/ai-ml.md).
 - **NVIDIA GPU & LLM Benchmark** — a Quick build that produces one offline
   Podman image with an interactive terminal dashboard: live GPU status, LLM
   token speed and latency with vLLM on local models, GEMM compute, memory

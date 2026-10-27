@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""LayerSmith AI/ML image check: what is in this image, and does CUDA work here.
+
+  layersmith-aiml-check basic [--json]   no GPU needed; run by LayerSmith after each build
+  layersmith-aiml-check gpu   [--json]   on a GPU worker, with GPUs passed in through CDI
+
+The last line of output is always one result line,
+`LAYERSMITH_CHECK_RESULT {json}`, which LayerSmith records for exactly the
+image named in it. Nothing here touches the network. It also runs from
+standard input (`python3 - gpu < layersmith-aiml-check`), so an upstream image
+LayerSmith did not change can be checked the same way.
+
+Standard library only, Python 3.8 or newer.
+"""
+
+import json
+import os
+import platform
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+RESULT_PREFIX = "LAYERSMITH_CHECK_RESULT "
+ENV_KEYS = ("CUDA_VERSION", "CUDNN_VERSION", "NCCL_VERSION", "TRT_VERSION", "NVIDIA_PYTORCH_VERSION",
+            "PYTORCH_VERSION", "VLLM_IMAGE_TAG", "NVIDIA_REQUIRE_CUDA", "NVIDIA_DRIVER_CAPABILITIES",
+            "PIP_CONSTRAINT", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")
+SLURM_KEYS = ("SLURM_JOB_ID", "SLURM_JOB_NAME", "SLURM_NNODES", "SLURM_NODEID", "SLURM_JOB_NODELIST",
+              "LAYERSMITH_SLURM_NODE", "LAYERSMITH_SLURM_GPUS", "LAYERSMITH_SLURM_ISOLATION",
+              "LAYERSMITH_SLURM_PARTITION")
+STATE_DIR = os.environ.get("LAYERSMITH_AIML_STATE_DIR", "/opt/layersmith/aiml")
+
+
+class Steps:
+    def __init__(self):
+        self.items = []
+
+    def run(self, name, function, required=True):
+        started = time.time()
+        try:
+            detail = function()
+            status = "passed"
+        except Skip as exc:
+            detail, status = str(exc), "skipped"
+        except Exception as exc:  # a failed step is a result, not a crash
+            detail, status = "%s: %s" % (type(exc).__name__, exc), "failed" if required else "warning"
+        self.items.append({"name": name, "status": status, "detail": str(detail)[:600],
+                           "seconds": round(time.time() - started, 2)})
+        print("  [%s] %s: %s" % (status.upper(), name, str(detail)[:300]), flush=True)
+        return status == "passed"
+
+    def verdict(self):
+        return "failed" if any(s["status"] == "failed" for s in self.items) else "passed"
+
+
+class Skip(Exception):
+    pass
+
+
+def os_release():
+    try:
+        with open("/etc/os-release") as handle:
+            for line in handle:
+                if line.startswith("PRETTY_NAME="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+def distributions():
+    try:
+        from importlib import metadata
+    except ImportError:  # Python < 3.8
+        return {}
+    found = {}
+    for dist in metadata.distributions():
+        name = (dist.metadata.get("Name") or "").strip()
+        if name:
+            found[name.lower().replace("_", "-").replace(".", "-")] = dist.version
+    return dict(sorted(found.items()))
+
+
+def pip_check():
+    done = subprocess.run([sys.executable, "-m", "pip", "check"], stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, universal_newlines=True, timeout=300)
+    if "No module named pip" in done.stdout:
+        raise Skip("pip is not installed in this image, so its dependency check cannot run")
+    lines = [l for l in done.stdout.splitlines() if l.strip() and "No broken requirements" not in l]
+    return lines
+
+
+def framework_info(info):
+    """Versions of whichever framework the image has, without touching a GPU."""
+    try:
+        import torch
+    except ImportError:
+        torch = None
+    if torch is not None:
+        info["torch"] = torch.__version__
+        info["torch_cuda"] = torch.version.cuda
+        try:
+            info["cudnn"] = str(torch.backends.cudnn.version())
+        except Exception:
+            pass
+        # get_arch_list() returns [] without a GPU; the compiled flags do not need one.
+        flags = getattr(torch._C, "_cuda_getArchFlags", lambda: None)()
+        info["compiled_archs"] = sorted(set((flags or "").split()))
+    try:
+        import tensorflow as tf
+        info["tensorflow"] = tf.__version__
+        build = tf.sysconfig.get_build_info()
+        info["tf_cuda"] = build.get("cuda_version")
+        info["tf_cudnn"] = build.get("cudnn_version")
+        caps = build.get("cuda_compute_capabilities") or []
+        info["compiled_archs"] = sorted(set(str(c) for c in caps))
+    except ImportError:
+        pass
+    if "torch" not in info and "tensorflow" not in info:
+        raise RuntimeError("neither PyTorch nor TensorFlow can be imported")
+    return ", ".join("%s %s" % (k, info[k]) for k in ("torch", "torch_cuda", "tensorflow", "tf_cuda") if info.get(k))
+
+
+def basic(steps, info):
+    info["python"] = platform.python_version()
+    info["os"] = os_release()
+    info["env"] = {k: os.environ[k] for k in ENV_KEYS if os.environ.get(k)}
+    steps.run("python", lambda: "Python %s on %s" % (info["python"], info["os"]))
+    framework_required = os.environ.get("LAYERSMITH_AIML_FRAMEWORK", "") in ("pytorch", "tensorflow", "vllm")
+    steps.run("framework import", lambda: framework_info(info), required=framework_required)
+    steps.run("cuda version", lambda: cuda_version(info))
+    packages = distributions()
+    info["packages"] = packages
+
+    def requested():
+        wanted = [w for w in os.environ.get("LAYERSMITH_AIML_EXPECT", "").split() if w]
+        missing = [w for w in wanted if w.lower().replace("_", "-") not in packages]
+        if missing:
+            raise RuntimeError("not installed: " + ", ".join(missing))
+        return "%d packages installed, %d requested by the recipe all present" % (len(packages), len(wanted))
+    steps.run("installed libraries", requested)
+
+    def dependencies():
+        problems = pip_check()
+        info["pip_check"] = problems
+        baseline_path = os.path.join(STATE_DIR, "pip-check-base.txt")
+        if os.path.isfile(baseline_path):
+            with open(baseline_path) as handle:
+                baseline = set(l.strip() for l in handle if l.strip())
+            new = [p for p in problems if p.strip() not in baseline]
+            if new:
+                raise RuntimeError("new dependency conflicts: " + "; ".join(new[:5]))
+            return "no new conflicts (%d already present in the base image)" % len(problems)
+        if problems:
+            raise Skip("upstream image reports %d conflict(s) of its own: %s" % (len(problems), problems[0]))
+        return "pip check: no broken requirements"
+    steps.run("dependency check", dependencies, required=True)
+
+    def offline():
+        flags = {k: os.environ.get(k) for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE")}
+        if all(v == "1" for v in flags.values()):
+            return "Hugging Face libraries are set to offline mode"
+        raise Skip("offline flags not set in this image (an unchanged upstream image keeps its defaults)")
+    steps.run("offline defaults", offline, required=False)
+
+
+def cuda_version(info):
+    if info.get("torch_cuda"):
+        return "PyTorch built for CUDA %s; image CUDA %s" % (info["torch_cuda"], os.environ.get("CUDA_VERSION", "?"))
+    if info.get("tf_cuda"):
+        return "TensorFlow built for CUDA %s" % info["tf_cuda"]
+    if os.environ.get("CUDA_VERSION"):
+        return "image CUDA %s" % os.environ["CUDA_VERSION"]
+    raise RuntimeError("no CUDA version found in the image")
+
+
+def nvidia_smi(info):
+    try:
+        done = subprocess.run(["nvidia-smi", "--query-gpu=index,name,uuid,memory.total,compute_cap,driver_version",
+                               "--format=csv,noheader,nounits"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              universal_newlines=True, timeout=60)
+    except FileNotFoundError:
+        raise RuntimeError("nvidia-smi is not in the container: the GPUs were not passed in through CDI")
+    if done.returncode != 0:
+        raise RuntimeError(done.stdout.strip()[:300] or "nvidia-smi failed")
+    devices = []
+    for line in done.stdout.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) >= 6:
+            devices.append({"index": parts[0], "name": parts[1], "uuid": parts[2],
+                            "memory_gb": round(float(parts[3]) / 1024, 1) if parts[3].replace(".", "").isdigit()
+                            else None, "capability": parts[4]})
+            info["driver"] = parts[5]
+    if not devices:
+        raise RuntimeError("nvidia-smi lists no GPUs")
+    info["devices"] = devices
+    return "%d GPU(s), driver %s: %s" % (len(devices), info.get("driver"), "; ".join(d["name"] for d in devices))
+
+
+def gpu(steps, info, expect):
+    info["python"] = platform.python_version()
+    info["env"] = {k: os.environ[k] for k in ENV_KEYS if os.environ.get(k)}
+    slurm = {k: os.environ[k] for k in SLURM_KEYS if os.environ.get(k)}
+    if slurm:
+        info["slurm"] = slurm
+    steps.run("nvidia-smi", lambda: nvidia_smi(info))
+    if expect:
+        def count():
+            seen = len(info.get("devices") or [])
+            if seen != expect:
+                raise RuntimeError("the container sees %d GPU(s), the job was allocated %d" % (seen, expect))
+            return "%d GPU(s), as allocated" % seen
+        steps.run("allocated GPUs only", count)
+    try:
+        import torch
+    except ImportError:
+        torch = None
+    if torch is None:
+        try:
+            import tensorflow as tf  # noqa: F401
+        except ImportError:
+            steps.run("framework", lambda: (_ for _ in ()).throw(Skip("no PyTorch or TensorFlow; nvidia-smi only")),
+                      required=False)
+            return
+        tensorflow_gpu(steps, info)
+        return
+
+    info["torch"] = torch.__version__
+    info["torch_cuda"] = torch.version.cuda
+
+    def available():
+        if not torch.cuda.is_available():
+            raise RuntimeError("torch.cuda.is_available() is False")
+        return "torch.cuda.is_available() is True, %d device(s)" % torch.cuda.device_count()
+    if not steps.run("torch.cuda.is_available", available):
+        return
+
+    def describe():
+        archs = torch.cuda.get_arch_list()
+        info["compiled_archs"] = archs
+        rows = []
+        for index in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(index)
+            capability = "%d.%d" % (props.major, props.minor)
+            sm = "sm_%d%d" % (props.major, props.minor)
+            native = sm in archs
+            rows.append({"index": index, "name": props.name, "capability": capability,
+                         "memory_gb": round(props.total_memory / 1024 ** 3, 1), "native_kernels": native})
+        info["torch_devices"] = rows
+        missing = [r for r in rows if not r["native_kernels"]]
+        if missing and not any(a.startswith("compute_") for a in archs):
+            raise RuntimeError("no kernels for %s in this PyTorch build (%s)"
+                               % (", ".join("sm_" + r["capability"].replace(".", "") for r in missing), " ".join(archs)))
+        return "; ".join("%s (sm_%s, %.0f GB%s)" % (r["name"], r["capability"].replace(".", ""), r["memory_gb"],
+                                                   "" if r["native_kernels"] else ", PTX JIT") for r in rows)
+    steps.run("GPU model and memory", describe)
+
+    def matmul():
+        results = []
+        torch.backends.cuda.matmul.allow_tf32 = False
+        for index in range(torch.cuda.device_count()):
+            device = torch.device("cuda", index)
+            generator = torch.Generator().manual_seed(1234)
+            a = torch.randn(1024, 1024, generator=generator)
+            b = torch.randn(1024, 1024, generator=generator)
+            expected = a @ b
+            got = (a.to(device) @ b.to(device)).cpu()
+            if not torch.allclose(got, expected, rtol=1e-3, atol=1e-2):
+                raise RuntimeError("GPU %d: FP32 result differs from the CPU result" % index)
+            size = 8192
+            x = torch.randn(size, size, device=device, dtype=torch.bfloat16)
+            y = torch.randn(size, size, device=device, dtype=torch.bfloat16)
+            for _ in range(3):
+                x @ y
+            torch.cuda.synchronize(device)
+            start = time.time()
+            for _ in range(10):
+                x @ y
+            torch.cuda.synchronize(device)
+            tflops = 2 * size ** 3 * 10 / (time.time() - start) / 1e12
+            results.append({"index": index, "bf16_tflops": round(tflops, 1)})
+        info["matmul"] = results
+        return "FP32 matches CPU on every GPU; BF16 8192x8192: " + ", ".join(
+            "GPU%d %.0f TFLOPS" % (r["index"], r["bf16_tflops"]) for r in results)
+    steps.run("PyTorch matrix multiplication", matmul)
+
+
+def tensorflow_gpu(steps, info):
+    import tensorflow as tf
+
+    info["tensorflow"] = tf.__version__
+
+    def devices():
+        found = tf.config.list_physical_devices("GPU")
+        if not found:
+            raise RuntimeError("TensorFlow sees no GPU")
+        return "%d GPU(s) visible to TensorFlow" % len(found)
+    if not steps.run("tensorflow GPUs", devices):
+        return
+
+    def matmul():
+        with tf.device("/GPU:0"):
+            a = tf.random.stateless_normal((1024, 1024), seed=(1, 2))
+            b = tf.random.stateless_normal((1024, 1024), seed=(3, 4))
+            got = tf.linalg.matmul(a, b)
+        with tf.device("/CPU:0"):
+            expected = tf.linalg.matmul(a, b)
+        if float(tf.reduce_max(tf.abs(got - expected))) > 0.5:
+            raise RuntimeError("GPU result differs from the CPU result")
+        return "GPU matmul matches CPU"
+    steps.run("TensorFlow matrix multiplication", matmul)
+
+
+def main(argv):
+    mode = argv[0] if argv and argv[0] in ("basic", "gpu") else None
+    if mode is None:
+        print(__doc__)
+        return 2
+    expect = 0
+    if "--expect-gpus" in argv:
+        expect = int(argv[argv.index("--expect-gpus") + 1])
+    image = os.environ.get("LAYERSMITH_IMAGE", "")
+    if "--image" in argv:
+        image = argv[argv.index("--image") + 1]
+    print("LayerSmith AI/ML check: %s (%s)" % (mode, image or "image not named"), flush=True)
+    steps, info = Steps(), {}
+    if mode == "basic":
+        basic(steps, info)
+    else:
+        gpu(steps, info, expect)
+    check = "slurm" if mode == "gpu" and info.get("slurm") else mode
+    result = {"check": check, "status": steps.verdict(), "image": image, "host": platform.node(),
+              "finished": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "steps": steps.items, "info": info}
+    print(RESULT_PREFIX + json.dumps(result, sort_keys=True), flush=True)
+    return 0 if result["status"] == "passed" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

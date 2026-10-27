@@ -65,7 +65,14 @@ def generate(project, spec, base_digest=None, image_ref=None):
     recipe = None
     gpu_recipe = None
     gpu_render = None
-    if spec.get("gpu_benchmark"):
+    aiml_recipe = None
+    if spec.get("aiml"):
+        from layersmith.aiml import recipes as aiml_recipes, render as aiml_render
+
+        aiml_recipe = aiml_recipes.resolve(spec["aiml"])
+        # Python packages go through layersmith-aiml-pip, never the distro's package manager.
+        packages, warnings = [], list(aiml_recipe["warnings"])
+    elif spec.get("gpu_benchmark"):
         from layersmith.gpu_benchmark import render as gpu_render
 
         gpu_recipe = gpu_render.recipe_for(spec["gpu_benchmark"])
@@ -104,6 +111,9 @@ def generate(project, spec, base_digest=None, image_ref=None):
     if gpu_recipe:
         labels["org.opencontainers.image.base.name"] = gpu_recipe["base"]
         labels.update(gpu_render.labels(gpu_recipe))
+    if aiml_recipe:
+        labels["org.opencontainers.image.base.name"] = aiml_recipe["base"]["display"]
+        labels.update(aiml_render.labels(aiml_recipe))
     lines.append("LABEL " + " \\\n      ".join(f"{k}={_quote(v)}" for k, v in labels.items()))
 
     if scripts.get("pre_build"):
@@ -120,6 +130,8 @@ def generate(project, spec, base_digest=None, image_ref=None):
         lines += render.install_lines(recipe)
     if gpu_recipe:
         lines += gpu_render.install_lines(gpu_recipe)
+    if aiml_recipe:
+        lines += aiml_render.install_lines(aiml_recipe, image_ref)
 
     for tool in spec.get("tools") or []:
         lines.append(f"COPY --chmod={tool['mode']} tools/{tool['sha256']} {tool['install_path']}")

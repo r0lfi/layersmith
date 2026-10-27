@@ -113,6 +113,8 @@ class Build(Base):
     #: this exact image, {"results": {check id: result}}. Never copied from
     #: another build: results describe one image.
     checks: Mapped[dict | None] = mapped_column(JSON)
+    #: AI/ML images only: extra archives made on request ({"exports": {format: {...}}}).
+    aiml: Mapped[dict | None] = mapped_column(JSON)
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

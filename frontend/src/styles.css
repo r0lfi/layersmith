@@ -101,6 +101,7 @@ p { margin: 0.4rem 0; }
 .grid.stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .grid.cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grid.three { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 1rem; }
 
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; }
 .stat-value { font-size: 1.9rem; font-weight: 660; letter-spacing: -0.03em; }
@@ -425,4 +426,18 @@ h4 { margin: 0.9rem 0 0.3rem; font-size: 0.9rem; font-weight: 620; }
 .table td.split-sha { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
   .table td.split-sha { max-width: none; white-space: normal; overflow-wrap: anywhere; font-size: 0.75rem; }
+}
+
+/* AI / ML / GPU: compatibility rows (pass, warn, fail, unknown) */
+.check-row.compat { padding: 0.5rem 0.7rem; }
+.compat-line { display: grid; grid-template-columns: 1.5rem minmax(10rem, max-content) 1fr; gap: 0.6rem; align-items: baseline; }
+.compat-detail { font-size: 0.8rem; }
+.compat-evidence { display: block; color: var(--text-faint); font-size: 0.74rem; margin-top: 0.15rem; }
+.check-row.pass .check-icon, .check-row.pass .check-label { color: var(--ok); }
+.check-row.warn .check-icon, .check-row.warn .check-label { color: var(--warn); }
+.check-row.fail .check-icon, .check-row.fail .check-label { color: var(--fail); }
+.check-row.unknown .check-icon, .check-row.unknown .check-label { color: var(--text-dim); }
+@media (max-width: 720px) {
+  .compat-line { grid-template-columns: 1.5rem 1fr; }
+  .compat-detail { grid-column: 2; }
 }

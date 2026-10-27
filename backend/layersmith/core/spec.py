@@ -121,8 +121,12 @@ def validate_spec(spec):
 
     has_training = bool(spec.get("training"))
     has_gpu_benchmark = spec.get("gpu_benchmark") is not None and "gpu_benchmark" in spec
-    if has_training and has_gpu_benchmark:
-        raise InvalidSpec("Choose either an LLM training profile or the GPU benchmark template, not both.")
+    has_aiml = bool(spec.get("aiml"))
+    if has_training + has_gpu_benchmark + has_aiml > 1:
+        raise InvalidSpec("Choose either an LLM training profile, the GPU benchmark template or an "
+                          "AI/ML/GPU template, not several.")
+    if has_aiml:
+        _apply_aiml(spec)
     if has_gpu_benchmark:
         _apply_gpu_benchmark(spec)
     if has_training:
@@ -244,6 +248,30 @@ def _apply_training(spec):
     }
     spec["architecture"] = recipe["architecture"]
     spec["base"] = {"source": recipe["base"]["reference"], "family": "deb", "display": recipe["base"]["display"]}
+
+
+def _apply_aiml(spec):
+    """An AI/ML template owns its base (pinned by digest) and installs Python packages, not distro packages."""
+    from layersmith.aiml import recipes  # imported here: recipes imports this module
+
+    for key in ("packages", "extra_packages", "presets", "tools", "files", "scripts", "user", "workdir", "env"):
+        if spec.get(key):
+            raise InvalidSpec(f"AI/ML/GPU images are made from their template; remove the custom {key}, or take "
+                              "the Containerfile over in Advanced mode.")
+    try:
+        recipe = recipes.resolve(spec["aiml"])
+    except recipes.AimlError as exc:
+        raise InvalidSpec(str(exc)) from exc
+    request = {key: value for key, value in spec["aiml"].items() if value not in (None, "", [])}
+    request.update({"template": recipe["template"], "mode": recipe["mode"]})
+    if recipe["template"] != "custom":
+        request["version"] = recipe["version"]
+    spec["aiml"] = request
+    if spec.get("architecture") not in (None, "amd64"):
+        raise InvalidSpec("AI/ML/GPU templates target x86_64 (amd64) GPU servers.")
+    spec["architecture"] = "amd64"
+    spec["base"] = {"source": recipe["base"]["reference"], "family": recipe["family"],
+                    "display": recipe["base"]["display"]}
 
 
 def _apply_gpu_benchmark(spec):

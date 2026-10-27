@@ -11,6 +11,7 @@ import json
 import uuid
 import queue
 import shutil
+import threading
 from pathlib import Path
 
 from fastapi import (
@@ -49,6 +50,16 @@ from layersmith.training import docs as training_docs
 from layersmith.training import recipes as training_recipes
 from layersmith.gpu_benchmark import catalog as gpu_benchmark_catalog
 from layersmith.gpu_benchmark import render as gpu_benchmark_render
+from layersmith.aiml import catalog as aiml_catalog
+from layersmith.aiml import checks as aiml_checks
+from layersmith.aiml import compat as aiml_compat
+from layersmith.aiml import export as aiml_export
+from layersmith.aiml import lint as aiml_lint
+from layersmith.aiml import recipes as aiml_recipes
+from layersmith.aiml import render as aiml_render
+from layersmith.aiml import slurm as aiml_slurm
+from layersmith.aiml import upstream as aiml_upstream
+from layersmith.services.builds import aiml_recipe
 
 router = APIRouter(prefix="/api")
 
@@ -61,7 +72,7 @@ LOG_CHUNK_MAX_BYTES = 1024 * 1024
 
 #: Optional API additions a client can check for instead of guessing from the
 #: version. Additive only: a client must keep working without any of them.
-API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit"]
+API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit", "aiml"]
 
 
 # ------------------------------------------------------------- schemas
@@ -106,6 +117,30 @@ class TrainingResolveIn(BaseModel):
 
 class GpuBenchmarkResolveIn(BaseModel):
     gpu_benchmark: dict = Field(default_factory=dict)
+
+
+class AimlResolveIn(BaseModel):
+    aiml: dict = Field(default_factory=dict)
+    driver: str | None = None
+    gpus: list[str] | None = None
+
+
+class AimlLintIn(BaseModel):
+    containerfile: str
+
+
+class AimlSlurmIn(BaseModel):
+    params: dict = Field(default_factory=dict)
+    image: str | None = None
+
+
+class AimlReportIn(BaseModel):
+    #: The output of the GPU test or of a Slurm job, or its result JSON.
+    report: dict | str
+
+
+class AimlExportIn(BaseModel):
+    format: str = "docker-archive"
 
 
 class ModelIn(BaseModel):
@@ -162,6 +197,7 @@ def _build_json(build: Build, project: Project | None = None) -> dict:
         "started_at": build.started_at, "finished_at": build.finished_at, "created_at": build.created_at,
         "duration_seconds": build.duration_seconds,
         "training_profile": ((build.spec or {}).get("training") or {}).get("profile"),
+        "aiml_template": ((build.spec or {}).get("aiml") or {}).get("template"),
     }
 
 
@@ -204,6 +240,63 @@ def _gpu_benchmark_detail(build: Build, backend: str = "podman") -> dict | None:
 
 
 
+def _aiml_detail(build: Build, backend: str = "podman") -> dict | None:
+    """Recipe, metadata read from the image, tests, compatibility and exports of an AI/ML build."""
+    try:
+        recipe = aiml_recipe(build.spec)
+    except aiml_catalog.AimlError as exc:  # a saved recipe this version no longer offers
+        return {"error": str(exc)}
+    if recipe is None:
+        return None
+    image = build.image_ref or "IMAGE"
+    results = (build.checks or {}).get("results") or {}
+    basic = (results.get("basic") or {}).get("info") or {}
+    reported = results.get("slurm") or results.get("gpu")
+    archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+    exports = {"primary": {"format": "OCI archive (podman save --format oci-archive)" if backend == "podman"
+                           else "Docker archive (docker save)",
+                           "archive": archive, "size": build.export_size, "sha256": build.export_sha256,
+                           "available": _downloadable(build.export_path)}}
+    for fmt, entry in ((build.aiml or {}).get("exports") or {}).items():
+        exports[fmt] = {**{k: v for k, v in entry.items() if k != "path"},
+                        "archive": Path(entry.get("path", "")).name,
+                        "available": entry.get("status") == "ready" and _downloadable(entry.get("path"))}
+    metadata = {
+        "base": recipe["base"]["display"], "base_digest": build.base_digest or recipe["base"]["digest"],
+        "base_verified": recipe["base"]["verified"],
+        "cuda": (basic.get("env") or {}).get("CUDA_VERSION") or recipe["cuda"],
+        "framework": recipe["framework"],
+        "torch": basic.get("torch"), "torch_cuda": basic.get("torch_cuda"), "tensorflow": basic.get("tensorflow"),
+        "python": basic.get("python") or recipe["python"], "os": basic.get("os") or recipe["os"],
+        "cudnn": (basic.get("env") or {}).get("CUDNN_VERSION") or basic.get("cudnn"),
+        "nccl": (basic.get("env") or {}).get("NCCL_VERSION"),
+        "compiled_archs": basic.get("compiled_archs"),
+        "image_size": build.image_size, "image_digest": build.image_digest,
+        "package_count": len(basic.get("packages") or {}),
+        "requested": recipe["install"], "status": build.status,
+    }
+    try:
+        compatibility = aiml_compat.check(recipe, basic=basic, reported=reported)
+    except aiml_catalog.AimlError:
+        compatibility = []
+    return {
+        "recipe": recipe, "metadata": metadata, "compatibility": compatibility,
+        "tests": aiml_checks.summarise(build.status, build.checks),
+        "exports": exports,
+        "offline": {"verify": f"sha256sum -c {archive}.sha256", "load": f"podman load -i {archive}",
+                    "list": "podman images", "run": aiml_render.run_command(recipe, image),
+                    "gpu_test": aiml_render.gpu_test_command(recipe, image)},
+        "slurm_defaults": {**aiml_slurm.DEFAULTS, "job_name": f"{recipe['template']}-gpu"[:63]},
+        "target": aiml_catalog.TARGET,
+    }
+
+
+def _aiml_archive_name(build: Build) -> str:
+    from layersmith.core.spec import export_filename
+
+    return export_filename((build.image_ref or "image:1.0.0").rsplit(":", 1)[0], build.version)
+
+
 def _downloadable(path_value: str | None) -> bool:
     if not path_value:
         return False
@@ -241,6 +334,14 @@ def _prepare_spec(payload_spec: dict, template: str) -> dict:
         if key in fragment and key in payload_spec:
             merged[key] = list(dict.fromkeys([*fragment[key], *payload_spec[key]]))
     return validate_spec(merged)
+
+
+def _lint_ai_containerfile(payload: "ProjectIn") -> None:
+    """A hand-written Containerfile of an AI/ML project must not carry credentials or disable isolation."""
+    if payload.template in aiml_catalog.TEMPLATE_NAMES.values():
+        errors = aiml_lint.lint(payload.containerfile)["errors"]
+        if errors:
+            raise InvalidSpec("; ".join(errors[:5]))
 
 
 def _safe_download(path_value: str | None, allowed_dirs: list[Path]) -> Path:
@@ -438,6 +539,7 @@ def create_project(payload: ProjectIn, state=Depends(get_state)):
             containerfile_text = ""
             base_image = spec["base"]["source"]
         else:
+            _lint_ai_containerfile(payload)
             bases = cf.bases(payload.containerfile)
             if not bases:
                 raise InvalidSpec("The Containerfile has no FROM line to build from")
@@ -481,6 +583,11 @@ def get_project(project_id: str, state=Depends(get_state)):
             data["containerfile"] = text
             data["packages"] = packages
             data["warnings"] = warnings
+            if project.spec.get("aiml"):
+                try:
+                    data["aiml"] = aiml_recipes.resolve(project.spec["aiml"])
+                except aiml_catalog.AimlError:
+                    data["aiml"] = None
             if project.spec.get("training"):
                 try:
                     data["training"] = training_recipes.resolve(project.spec["training"],
@@ -501,6 +608,7 @@ def update_project(project_id: str, payload: ProjectIn, state=Depends(get_state)
                 project.spec = _prepare_spec(payload.spec, payload.template)
                 project.base_image = project.spec["base"]["source"]
             else:
+                _lint_ai_containerfile(payload)
                 bases = cf.bases(payload.containerfile)
                 if not bases:
                     raise InvalidSpec("The Containerfile has no FROM line to build from")
@@ -609,7 +717,8 @@ def get_build(build_id: str, state=Depends(get_state)):
         return {**_build_json(build, project), "containerfile": build.containerfile, "log": log,
                 "manifest": manifest_for(project, build, build.export_sha256),
                 "training": _training_detail(build, scanned=_has_completed_scan(session, build.id)),
-                "gpu_benchmark": _gpu_benchmark_detail(build, state["build_service"].backend.name)}
+                "gpu_benchmark": _gpu_benchmark_detail(build, state["build_service"].backend.name),
+                "aiml": _aiml_detail(build, state["build_service"].backend.name)}
 
 
 @router.get("/builds/{build_id}/log")
@@ -745,6 +854,164 @@ def gpu_benchmark_resolve(payload: GpuBenchmarkResolveIn):
     return {"ok": True, "recipe": recipe,
             "getting_started": gpu_benchmark_render.getting_started(recipe, "localhost/gpu-benchmark:1.0.0"),
             "storage": gpu_benchmark_storage(recipe)}
+
+
+@router.get("/aiml/catalog")
+def aiml_catalog_view():
+    templates = {}
+    for key, template in aiml_catalog.TEMPLATES.items():
+        versions = {}
+        for version, entry in template["versions"].items():
+            included = aiml_recipes.base_packages(entry.get("packages"))
+            versions[version] = {**{k: v for k, v in entry.items() if k != "packages"},
+                                 "reference": f"{entry['image']}:{entry['tag']}@{entry['digest']}",
+                                 "included": {catalog_name: included[catalog_name] for catalog_name in
+                                              sorted(included) if catalog_name in aiml_recipes.HIGHLIGHT},
+                                 "package_count": len(included)}
+        templates[key] = {**{k: v for k, v in template.items() if k not in ("versions", "upstream")},
+                          "versions": versions}
+    return {"category": aiml_catalog.CATEGORY, "templates": templates, "tools": aiml_catalog.TOOLS,
+            "gpus": aiml_catalog.GPUS, "target": aiml_catalog.TARGET, "verified": aiml_catalog.VERIFIED,
+            "tests": aiml_checks.TESTS, "sources": aiml_catalog.SOURCES,
+            "slurm_defaults": aiml_slurm.DEFAULTS}
+
+
+@router.post("/aiml/resolve")
+def aiml_resolve(payload: AimlResolveIn):
+    """Validate an AI/ML request. A conflict is an answer here, not an error."""
+    try:
+        recipe = aiml_recipes.resolve(payload.aiml)
+        compatibility = aiml_compat.check(recipe, driver=payload.driver, gpus=payload.gpus)
+    except aiml_catalog.AimlError as exc:
+        return {"ok": False, "error": str(exc)}
+    from layersmith.services.builds import gpu_benchmark_storage
+
+    return {"ok": True, "recipe": recipe, "compatibility": compatibility, "names": aiml_recipes.default_names(recipe),
+            "storage": gpu_benchmark_storage(recipe) if recipe.get("estimated_size_gb") else None}
+
+
+@router.get("/aiml/upstream/{template}")
+def aiml_upstream_tags(template: str):
+    try:
+        return aiml_upstream.available(template)
+    except aiml_catalog.AimlError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.post("/aiml/lint")
+def aiml_lint_view(payload: AimlLintIn):
+    return aiml_lint.lint(payload.containerfile)
+
+
+def _aiml_build(session, build_id: str) -> tuple[Build, dict]:
+    build = session.get(Build, build_id)
+    if build is None:
+        raise HTTPException(404, "Build not found")
+    try:
+        recipe = aiml_recipe(build.spec)
+    except aiml_catalog.AimlError as exc:
+        raise HTTPException(409, str(exc))
+    if recipe is None:
+        raise HTTPException(409, "This is not an AI/ML/GPU build")
+    return build, recipe
+
+
+@router.post("/builds/{build_id}/aiml/slurm")
+def aiml_slurm_script(build_id: str, payload: AimlSlurmIn, state=Depends(get_state)):
+    """Generate a batch script for this build's image (or another image named in the request)."""
+    with state["session_factory"]() as session:
+        build, recipe = _aiml_build(session, build_id)
+        image = payload.image or build.image_ref
+    try:
+        return aiml_slurm.generate(payload.params, image, entrypoint_wraps=recipe["entrypoint_wraps"])
+    except aiml_catalog.AimlError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/builds/{build_id}/aiml/report")
+def aiml_record_report(build_id: str, payload: AimlReportIn, state=Depends(get_state)):
+    """Record a GPU or Slurm test that ran on a worker, for exactly this image."""
+    with state["session_factory"]() as session:
+        build, _recipe = _aiml_build(session, build_id)
+        if build.status != "ready":
+            raise HTTPException(409, "Test results can be recorded for finished builds only")
+        try:
+            result = aiml_checks.validate_report(payload.report, build.image_ref)
+        except aiml_checks.InvalidReport as exc:
+            raise HTTPException(422, str(exc))
+        checks = dict(build.checks or {})
+        checks["results"] = {**(checks.get("results") or {}), result["check"]: result}
+        build.checks = checks
+        session.commit()
+        return _aiml_detail(build, state["build_service"].backend.name)
+
+
+@router.post("/builds/{build_id}/aiml/export", status_code=202)
+def aiml_export_format(build_id: str, payload: AimlExportIn, state=Depends(get_state)):
+    """Write the image as another archive format in the background (docker-archive for Docker hosts)."""
+    service: BuildService = state["build_service"]
+    if payload.format not in ("docker-archive", "oci-archive"):
+        raise HTTPException(422, "format is docker-archive or oci-archive")
+    with state["session_factory"]() as session:
+        build, _recipe = _aiml_build(session, build_id)
+        if build.status != "ready":
+            raise HTTPException(409, "Only a finished build can be exported")
+        current = ((build.aiml or {}).get("exports") or {}).get(payload.format) or {}
+        if current.get("status") == "exporting":
+            raise HTTPException(409, "This export is already running")
+        if payload.format == getattr(service.backend, "archive_format", None):
+            raise HTTPException(409, f"The build's archive already is a {payload.format}")
+        if payload.format not in getattr(service.backend, "archive_formats", ()):
+            raise HTTPException(409, f"The {service.backend.name} backend cannot write a {payload.format}")
+
+    def work():
+        try:
+            service.export_format(build_id, payload.format)
+        except BuildError:
+            pass  # recorded on the build as a failed export
+
+    threading.Thread(target=work, name=f"layersmith-export-{build_id[:8]}", daemon=True).start()
+    return {"status": "exporting", "format": payload.format}
+
+
+AIML_FILES = {
+    "packages.json": "application/json", "requirements.lock": "text/plain", "sbom.cdx.json": "application/json",
+    "layersmith-aiml-check": "text/x-python", "README.md": "text/markdown",
+}
+
+
+@router.get("/builds/{build_id}/aiml/files/{name}")
+def aiml_file(build_id: str, name: str, state=Depends(get_state)):
+    with state["session_factory"]() as session:
+        build, recipe = _aiml_build(session, build_id)
+        if name in ("docker-archive", "docker-archive.sha256", "oci-archive", "oci-archive.sha256"):
+            fmt = name.split(".")[0]
+            entry = ((build.aiml or {}).get("exports") or {}).get(fmt) or {}
+            if entry.get("status") != "ready":
+                raise HTTPException(404, "This archive has not been exported")
+            path = _safe_download(entry.get("path"), [config.settings().image_dir,
+                                                      *storage.previous_image_dirs(session)])
+            if name.endswith(".sha256"):
+                return Response(f"{entry['sha256']}  {path.name}\n", media_type="text/plain",
+                                headers={"Content-Disposition": f'attachment; filename="{path.name}.sha256"'})
+            return FileResponse(path, filename=path.name, media_type="application/octet-stream")
+        if name not in AIML_FILES:
+            raise HTTPException(404, "Unknown file")
+        if name == "layersmith-aiml-check":
+            body = aiml_render.CHECK_SCRIPT.read_text(encoding="utf-8")
+        elif name == "packages.json":
+            body = json.dumps(aiml_export.packages(build, recipe), indent=2) + "\n"
+        elif name == "requirements.lock":
+            body = aiml_export.lock(build)
+            if not body:
+                raise HTTPException(404, "No package list: the basic test did not run or found no Python")
+        elif name == "sbom.cdx.json":
+            body = json.dumps(aiml_export.sbom(build, recipe), indent=2) + "\n"
+        else:
+            archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+            body = aiml_export.readme(build, recipe, archive, build.export_sha256)
+        return Response(body, media_type=AIML_FILES[name],
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.delete("/builds/{build_id}")

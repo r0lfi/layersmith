@@ -41,6 +41,8 @@ export interface Build {
   training_profile?: string | null;
   training?: TrainingDetail | null;
   gpu_benchmark?: GpuBenchmarkDetail | null;
+  aiml_template?: string | null;
+  aiml?: AimlDetail | null;
 }
 
 /** Split download of an image archive: parts are byte ranges of the export. */
@@ -511,6 +513,173 @@ export interface Stats {
 
 export class ApiError extends Error {}
 
+// ------------------------------------------------------------ AI / ML / GPU
+
+export interface AimlVersion {
+  image: string;
+  tag: string;
+  digest: string;
+  reference: string;
+  cuda: string | null;
+  framework_version: string | null;
+  python: string | null;
+  os: string | null;
+  torch?: string;
+  components: Record<string, string>;
+  compressed_gb: number | null;
+  min_capability?: string;
+  max_native_capability?: string;
+  sources: string[];
+  included: Record<string, string>;
+  package_count: number;
+}
+
+export interface AimlTemplate {
+  name: string;
+  template_version: number;
+  purpose: string;
+  description: string;
+  framework: string;
+  python: boolean;
+  status: "supported" | "limited";
+  default_version: string | null;
+  versions: Record<string, AimlVersion>;
+}
+
+export interface AimlTool {
+  id: string;
+  pip: string;
+  label: string;
+  group: string;
+  frameworks?: string[];
+  note?: string;
+}
+
+export interface AimlTest { label: string; where: string; what: string }
+
+export interface AimlCatalog {
+  category: { id: string; name: string; intro: string };
+  templates: Record<string, AimlTemplate>;
+  tools: AimlTool[];
+  gpus: Record<string, { name: string; architecture: string; capability: string; memory_gb: number }>;
+  target: Record<string, string | string[]>;
+  verified: string;
+  tests: Record<string, AimlTest>;
+  sources: Record<string, string>;
+  slurm_defaults: SlurmParams;
+}
+
+export interface AimlRequest {
+  template: string;
+  version?: string;
+  mode: "import" | "custom";
+  tools: string[];
+  pip: string[];
+  base?: string;
+  family?: string;
+  pip_index_url?: string;
+}
+
+export interface AimlRecipe {
+  template: string;
+  template_name: string;
+  template_version: number;
+  framework: string;
+  version: string;
+  mode: "import" | "custom";
+  base: { reference: string; display: string; digest: string | null; verified: boolean; image: string; tag: string | null };
+  cuda: string | null;
+  framework_version: string | null;
+  python: string | null;
+  os: string | null;
+  components: Record<string, string>;
+  tools: (AimlTool & { status: "included" | "install"; version: string | null })[];
+  pip: string[];
+  install: string[];
+  included_packages_known: boolean;
+  included: Record<string, string>;
+  warnings: string[];
+  estimated_size_gb: number | null;
+  verified: string | null;
+}
+
+export interface CompatRow {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail" | "unknown";
+  detail: string;
+  evidence: "documented" | "image" | "hardware";
+  source?: string | null;
+}
+
+export interface AimlResolve {
+  ok: boolean;
+  error?: string;
+  recipe?: AimlRecipe;
+  compatibility?: CompatRow[];
+  names?: { name: string; repository: string; tag: string };
+  storage?: GpuBenchmarkCatalog["storage"] | null;
+}
+
+export interface AimlTestRow extends AimlTest {
+  id: "basic" | "gpu" | "slurm";
+  status: "passed" | "failed" | "not_run";
+  summary: string;
+  steps: { name: string; status: string; detail: string; seconds?: number | null }[];
+  info: Record<string, unknown>;
+  nodes?: { host: string; status: string }[] | null;
+  exit_code?: number | null;
+}
+
+export interface AimlExport {
+  format?: string;
+  archive: string;
+  size?: number | null;
+  sha256?: string | null;
+  status?: string;
+  error?: string;
+  available: boolean;
+}
+
+export interface SlurmParams {
+  job_name: string;
+  partition: string;
+  account: string;
+  nodes: number;
+  gpus_per_node: number;
+  gpu_type: string;
+  cpus_per_task: number;
+  mem: string;
+  time: string;
+  command: string;
+  mounts: { source: string; target: string; mode: "ro" | "rw" }[];
+  workdir: string;
+  output: string;
+  error: string;
+  network: "none" | "host";
+  shm_size: string;
+  selinux: "container_use_devices" | "label_disable";
+  kind: "job" | "test";
+}
+
+export interface AimlDetail {
+  error?: string;
+  recipe: AimlRecipe;
+  metadata: {
+    base: string; base_digest: string | null; base_verified: boolean; cuda: string | null; framework: string;
+    torch?: string | null; torch_cuda?: string | null; tensorflow?: string | null; python?: string | null;
+    os?: string | null; cudnn?: string | null; nccl?: string | null; compiled_archs?: string[] | null;
+    image_size?: number | null; image_digest?: string | null; package_count: number; requested: string[];
+    status: string;
+  };
+  compatibility: CompatRow[];
+  tests: AimlTestRow[];
+  exports: Record<string, AimlExport>;
+  offline: { verify: string; load: string; list: string; run: { podman: string; note: string }; gpu_test: string };
+  slurm_defaults: SlurmParams;
+  target: Record<string, string | string[]>;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
@@ -603,6 +772,21 @@ export const api = {
     request<GpuBenchmarkResolve>("/gpu-benchmark/resolve", {
       method: "POST", body: JSON.stringify({ gpu_benchmark }),
     }),
+  aimlCatalog: () => request<AimlCatalog>("/aiml/catalog"),
+  aimlResolve: (aiml: AimlRequest, driver?: string, gpus?: string[]) =>
+    request<AimlResolve>("/aiml/resolve", { method: "POST", body: JSON.stringify({ aiml, driver, gpus }) }),
+  aimlUpstream: (template: string) =>
+    request<{ verified: string[]; upstream: { tag: string; reference: string; verified: boolean }[]; error: string | null }>(
+      `/aiml/upstream/${encodeURIComponent(template)}`),
+  aimlSlurm: (buildId: string, params: Partial<SlurmParams>) =>
+    request<{ script: string; filename: string; warnings: string[] }>(`/builds/${buildId}/aiml/slurm`, {
+      method: "POST", body: JSON.stringify({ params }),
+    }),
+  aimlReport: (buildId: string, report: string) =>
+    request<AimlDetail>(`/builds/${buildId}/aiml/report`, { method: "POST", body: JSON.stringify({ report }) }),
+  aimlExport: (buildId: string, format: string) =>
+    request<{ status: string }>(`/builds/${buildId}/aiml/export`, { method: "POST", body: JSON.stringify({ format }) }),
+  aimlFileUrl: (buildId: string, name: string) => `/api/builds/${buildId}/aiml/files/${name}`,
   gpuReport: (buildId: string, report: string) =>
     request<TrainingDetail>(`/builds/${buildId}/gpu-report`, { method: "POST", body: JSON.stringify({ report }) }),
 

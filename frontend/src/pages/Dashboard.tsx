@@ -64,6 +64,13 @@ export default function Dashboard() {
               memory bandwidth and multi-GPU performance.
             </div>
           </button>
+          <button className="tile tile-gpu" onClick={() => navigate("/projects/new?category=ai-ml")}>
+            <div className="tile-title tile-title-icon"><GpuIcon /> AI / ML / GPU</div>
+            <div className="tile-sub">
+              NVIDIA PyTorch, CUDA, vLLM or TensorFlow: import or customise, test, export for an offline GPU
+              cluster and generate Slurm batch scripts.
+            </div>
+          </button>
           <button className="tile" onClick={() => navigate("/projects/new?category=llm-training")}>
             <div className="tile-title">LLM Training &amp; Fine-tuning</div>
             <div className="tile-sub">LoRA/QLoRA, full fine-tuning, LLaMA-Factory, data preparation</div>

@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Install the requested Python packages without replacing what the base image was built with.
+
+Run once, at build time, by the generated Containerfile:
+
+  layersmith-aiml-pip install REQUIREMENTS [--index-url URL]
+
+1. Every installed distribution that is protected (PyTorch, TensorRT,
+   FlashAttention, nvidia-* ... and anything with an NVIDIA local version
+   such as +nv26.9) is written to a constraints file pinned at its exact
+   installed version. NVIDIA's own /etc/pip/constraint.txt cannot be relied
+   on for this: the 26.09 PyTorch image ships it empty.
+2. `pip check` is recorded before the install, so conflicts the upstream
+   image already had are not blamed on the user's packages.
+3. pip installs with those constraints. A package that needs a different
+   version of a protected one fails here, at build time, with the reason.
+4. Protected versions are compared afterwards, and any new `pip check`
+   problem fails the build.
+5. The resulting package set is written to /opt/layersmith/aiml, so the image
+   documents exactly what it holds.
+
+Standard library only.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+
+STATE_DIR = os.environ.get("LAYERSMITH_AIML_STATE_DIR", "/opt/layersmith/aiml")
+PROTECTED_NAMES = set(os.environ.get("LAYERSMITH_AIML_PROTECTED", "").split())
+PROTECTED_PREFIXES = tuple(os.environ.get("LAYERSMITH_AIML_PROTECTED_PREFIXES", "").split())
+
+
+def normalise(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def installed():
+    from importlib import metadata
+
+    found = {}
+    for dist in metadata.distributions():
+        name = (dist.metadata.get("Name") or "").strip()
+        if name:
+            found[normalise(name)] = dist.version
+    return found
+
+
+def protected(name, version):
+    return (name in PROTECTED_NAMES or name.startswith(PROTECTED_PREFIXES)
+            or re.search(r"[+.]nv\d", version) is not None)
+
+
+def pip(*args, check=True):
+    argv = [sys.executable, "-m", "pip", *args]
+    print("+ " + " ".join(argv), flush=True)
+    done = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    print(done.stdout, end="", flush=True)
+    if check and done.returncode != 0:
+        raise SystemExit(done.returncode)
+    return done
+
+
+def pip_problems():
+    done = pip("check", check=False)
+    return sorted(l.strip() for l in done.stdout.splitlines() if l.strip() and "No broken requirements" not in l)
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] != "install":
+        print(__doc__)
+        return 2
+    requirements = argv[1]
+    index_url = argv[argv.index("--index-url") + 1] if "--index-url" in argv else None
+    os.makedirs(STATE_DIR, exist_ok=True)
+
+    before = installed()
+    pins = {name: version for name, version in before.items() if protected(name, version)}
+    constraints = os.path.join(STATE_DIR, "protected-constraints.txt")
+    with open(constraints, "w") as handle:
+        handle.write("# Base image builds LayerSmith does not let pip replace.\n")
+        handle.writelines("%s==%s\n" % item for item in sorted(pins.items()))
+    print("Protected %d base packages, e.g. %s" % (len(pins), ", ".join(
+        "%s %s" % (n, pins[n]) for n in sorted(pins)[:6])), flush=True)
+
+    baseline = pip_problems()
+    with open(os.path.join(STATE_DIR, "pip-check-base.txt"), "w") as handle:
+        handle.writelines(line + "\n" for line in baseline)
+
+    with open(requirements) as handle:
+        wanted = [line.strip() for line in handle if line.strip() and not line.startswith("#")]
+    if wanted:
+        args = ["install", "--no-cache-dir", "--disable-pip-version-check", "--no-input",
+                "--constraint", constraints, "--requirement", requirements]
+        if index_url:
+            args += ["--index-url", index_url]
+        # PIP_CONSTRAINT would add NVIDIA's (possibly empty) file; ours is the one that counts.
+        os.environ.pop("PIP_CONSTRAINT", None)
+        done = pip(*args, check=False)
+        if done.returncode != 0:
+            print("\nLAYERSMITH: pip could not install the requested packages without changing a package the "
+                  "base image was built with (see protected-constraints.txt), or a package was not found. "
+                  "Pick other versions, drop the package, or choose a base version that matches it.", flush=True)
+            return done.returncode
+
+    after = installed()
+    changed = ["%s %s -> %s" % (n, v, after.get(n, "removed")) for n, v in pins.items() if after.get(n) != v]
+    if changed:
+        print("LAYERSMITH: protected base packages changed: " + "; ".join(changed), flush=True)
+        return 1
+    new = [p for p in pip_problems() if p not in set(baseline)]
+    if new:
+        print("LAYERSMITH: the requested packages introduced dependency conflicts:\n  " + "\n  ".join(new), flush=True)
+        return 1
+
+    added = {n: v for n, v in after.items() if before.get(n) != v}
+    with open(os.path.join(STATE_DIR, "requirements.lock"), "w") as handle:
+        handle.writelines("%s==%s\n" % item for item in sorted(after.items()))
+    with open(os.path.join(STATE_DIR, "installed-by-layersmith.json"), "w") as handle:
+        json.dump({"requested": wanted, "added_or_changed": added, "protected": pins}, handle, indent=1,
+                  sort_keys=True)
+    print("Installed or changed %d package(s); %d protected base packages unchanged; no new conflicts."
+          % (len(added), len(pins)), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

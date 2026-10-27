@@ -4,6 +4,7 @@ import { api, Catalog, Spec } from "../api";
 import { Banner, Card, Field, useLoad } from "../components/ui";
 import TrainingWizard from "./TrainingWizard";
 import GpuBenchmarkWizard from "./GpuBenchmarkWizard";
+import AiMlWizard from "./AiMlWizard";
 
 const STEPS = ["Purpose", "Base", "Version", "Tools", "Packages", "Files", "Scripts", "Image", "Review"] as const;
 
@@ -64,6 +65,8 @@ function buildSpec(draft: Draft, catalog: Catalog): Spec {
 
 const CATEGORIES = [
   { id: "general", name: "General purpose", description: "Shells, admin, network, development and cluster tools" },
+  { id: "ai-ml", name: "AI / ML / GPU",
+    description: "NVIDIA PyTorch, CUDA, vLLM and TensorFlow images for Podman and Slurm, exported for air-gapped GPU clusters" },
   { id: "llm-training", name: "LLM Training & Fine-tuning",
     description: "Ready-to-run environments for fine-tuning and training language models" },
   { id: "gpu-benchmark", name: "NVIDIA GPU & LLM Benchmark",
@@ -72,7 +75,7 @@ const CATEGORIES = [
 
 export default function NewProject() {
   const [params, setParams] = useSearchParams();
-  const category = ["llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
+  const category = ["ai-ml", "llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
     ? params.get("category")! : "general";
   const setCategory = (id: string) =>
     setParams((current) => {
@@ -96,7 +99,9 @@ export default function NewProject() {
           </button>
         ))}
       </div>
-      {category === "llm-training" ? (
+      {category === "ai-ml" ? (
+        <AiMlWizard onLeave={() => setCategory("general")} />
+      ) : category === "llm-training" ? (
         <TrainingWizard onLeave={() => setCategory("general")} />
       ) : category === "gpu-benchmark" ? (
         <GpuBenchmarkWizard onLeave={() => setCategory("general")} />

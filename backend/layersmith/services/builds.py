@@ -86,8 +86,17 @@ def training_recipe(spec: dict | None) -> dict | None:
     return recipes.resolve(spec["training"], spec.get("architecture"))
 
 
+def aiml_recipe(spec: dict | None) -> dict | None:
+    """The resolved recipe of an AI/ML/GPU build, or None for any other build."""
+    if not (spec or {}).get("aiml"):
+        return None
+    from layersmith.aiml import recipes
+
+    return recipes.resolve(spec["aiml"])
+
+
 def gpu_benchmark_storage(recipe: dict | None = None) -> dict:
-    """Free space where images are exported, against what a GPU benchmark build needs.
+    """Free space where images are exported, against what a GPU benchmark (or AI/ML) build needs.
 
     The image itself (layers in the runtime's store) and its uncompressed
     export both need room, plus temporary space while the layers are written,
@@ -123,6 +132,7 @@ def gpu_benchmark_recipe(spec: dict | None) -> dict | None:
 def manifest_for(project: Project, build: Build, export_sha: str | None = None) -> dict:
     recipe = training_recipe(build.spec)
     gpu_recipe = gpu_benchmark_recipe(build.spec)
+    ai_recipe = aiml_recipe(build.spec)
     training = None
     if recipe:
         training = {"profile": recipe["profile"], "profile_version": recipe["profile_version"],
@@ -156,7 +166,19 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
                                "tools": gpu_recipe["tools"], "torch": gpu_recipe["torch"],
                                "vllm": gpu_recipe["vllm"], "nccl_tests": gpu_recipe["nccl_tests"]}}
            if gpu_recipe else {}),
+        **({"aiml": {"template": ai_recipe["template"], "template_version": ai_recipe["template_version"],
+                     "version": ai_recipe["version"], "mode": ai_recipe["mode"], "cuda": ai_recipe["cuda"],
+                     "framework_version": ai_recipe["framework_version"], "requested": ai_recipe["install"],
+                     "verified_base": ai_recipe["base"]["verified"],
+                     "basic_test": (((build.checks or {}).get("results") or {}).get("basic") or {}).get("status")}}
+           if ai_recipe else {}),
     }
+
+
+def extra_export_paths(build: Build) -> list[str]:
+    """Archives an AI/ML build made on request, besides its main export."""
+    return [entry["path"] for entry in ((build.aiml or {}).get("exports") or {}).values()
+            if isinstance(entry, dict) and entry.get("path")]
 
 
 class LogBus:
@@ -316,6 +338,11 @@ class BuildService:
             from layersmith.gpu_benchmark import render
 
             render.write_context(context, gpu_recipe, build.image_ref or "IMAGE")
+        ai_recipe = aiml_recipe(build.spec)
+        if ai_recipe and ai_recipe["mode"] == "custom":
+            from layersmith.aiml import render as aiml_render
+
+            aiml_render.write_context(context, ai_recipe)
         return context
 
     # --------------------------------------------------------------- run
@@ -353,6 +380,9 @@ class BuildService:
                             f"{space['path']}, about {space['required_free_gb']} GB needed (image layers plus the "
                             "exported archive). Free space or move LAYERSMITH_DATA_DIR to a larger volume; "
                             "LAYERSMITH_GPU_MIN_FREE_GB overrides the check.")
+                ai_recipe = aiml_recipe(build.spec)
+                if ai_recipe:
+                    self._aiml_preflight(build_id, ai_recipe)
 
                 self._set_status(build_id, "pulling")
                 digest = self.backend.resolve_base(build.base_image, build.architecture,
@@ -374,6 +404,8 @@ class BuildService:
 
                 if training_recipe(build.spec):
                     build.checks = self.run_checks(build_id, reference)
+                if ai_recipe:
+                    build.checks = self.run_aiml_checks(build_id, reference, ai_recipe)
 
                 self._set_status(build_id, "exporting")
                 export = Path(self.settings.image_dir) / export_filename(project_snapshot["repository"],
@@ -436,11 +468,13 @@ class BuildService:
             if build.status in ACTIVE_STATES:
                 raise BuildError("This build is still running; wait for it to finish before deleting it")
             others = session.scalars(select(Build).where(Build.id != build_id)).all()
-            shared_paths = {path for other in others for path in (other.export_path, other.airgap_path) if path}
+            shared_paths = {path for other in others for path in (other.export_path, other.airgap_path,
+                                                                    *extra_export_paths(other)) if path}
             shared_refs = {other.image_ref for other in others if other.image_ref}
             roots = [Path(directory).resolve() for directory in allowed_dirs]
             freed, notes = 0, []
-            for value in dict.fromkeys(path for path in (build.export_path, build.airgap_path) if path):
+            for value in dict.fromkeys(path for path in (build.export_path, build.airgap_path,
+                                                         *extra_export_paths(build)) if path):
                 path = Path(value)
                 if value in shared_paths:
                     notes.append(f"Kept {path.name}: another build uses the same file")
@@ -508,6 +542,113 @@ class BuildService:
                 session.commit()
         return {"results": results}
 
+    def _aiml_preflight(self, build_id: str, recipe: dict) -> None:
+        base = recipe["base"]
+        self._emit(build_id, f"AI/ML template {recipe['template_name']} {recipe['version']} "
+                             f"(template v{recipe['template_version']}, {recipe['mode']})")
+        if base["verified"]:
+            self._emit(build_id, f"Base pinned by digest, verified by LayerSmith on {recipe['verified']}: "
+                                 f"{base['display']}@{base['digest']}")
+        else:
+            self._emit(build_id, f"WARNING: unverified base {base['display']}; its digest is pinned at pull, its "
+                                 "contents are read by the basic test after the build")
+        if recipe.get("estimated_size_gb"):
+            space = gpu_benchmark_storage(recipe)
+            self._emit(build_id, f"AI/ML image: about {space['estimated_image_gb']} GB unpacked; "
+                                 f"{space['free_gb']} GB free at {space['path']}, {space['required_free_gb']} GB needed")
+            if space["enough"] is False:
+                raise BuildError(
+                    f"Not enough disk space for this image: {space['free_gb']} GB free at {space['path']}, about "
+                    f"{space['required_free_gb']} GB needed (image layers plus the exported archive). Free space "
+                    "or move LAYERSMITH_DATA_DIR to a larger volume; LAYERSMITH_GPU_MIN_FREE_GB overrides the check.")
+
+    def run_aiml_checks(self, build_id: str, reference: str, recipe: dict) -> dict:
+        """The basic test inside the new image: networking off, capabilities dropped, no GPU.
+
+        Never fails the build: a failed test is a result the build page shows.
+        The script is passed inline, so an unchanged upstream image is tested
+        exactly like a customised one.
+        """
+        from layersmith.aiml import checks, render as aiml_render
+
+        runner = getattr(self.backend, "run_container", None)
+        if runner is None:
+            self._emit(build_id, f"NOTE: the {self.backend.name} backend cannot run containers; basic test not run")
+            return {"results": {}}
+        self._set_status(build_id, "testing")
+        results = {}
+        entrypoint, argv = aiml_render.inline_check(recipe, reference, "basic")
+        self._emit(build_id, "--> Basic test (inside the image, networking disabled, no GPU)")
+        try:
+            code, output = runner(reference, argv, lambda line: self._emit(build_id, line),
+                                  timeout=checks.AUTOMATIC[0]["timeout"], entrypoint=entrypoint)
+        except Exception as exc:  # the runtime itself failed; record it like a failed test
+            code, output = 1, str(exc)
+        result = checks.parse_output(output)
+        if result is None:
+            result = {"check": "basic", "status": "failed", "info": {},
+                      "steps": [{"name": "run", "status": "failed",
+                                 "detail": f"no result line (exit status {code}): {output[-300:]}"}]}
+        result["source"] = "layersmith"
+        results["basic"] = result
+        self._emit(build_id, f"Basic test: {result['status'].upper()}")
+        return {"results": results}
+
+    def export_format(self, build_id: str, archive_format: str) -> Path:
+        """Write the image once more in another archive format (e.g. docker-archive) next to the export."""
+        if archive_format not in getattr(self.backend, "archive_formats", ()):
+            raise BuildError(f"The {self.backend.name} backend cannot write a {archive_format}")
+        with self.session_factory() as session:
+            build = session.get(Build, build_id)
+            if build is None or build.status != "ready" or not build.image_ref:
+                raise BuildError("Only a finished build can be exported")
+            if archive_format == (getattr(self.backend, "archive_format", None)):
+                raise BuildError(f"The build's archive already is a {archive_format}")
+            project = session.get(Project, build.project_id)
+            name = export_filename(project.repository, build.version)
+            suffix = {"docker-archive": ".docker.tar", "oci-archive": ".oci.tar"}[archive_format]
+            target = Path(self.settings.image_dir) / (name[:-len(".tar")] + suffix)
+            exports = dict((build.aiml or {}).get("exports") or {})
+            exports[archive_format] = {"status": "exporting", "path": str(target)}
+            build.aiml = {**(build.aiml or {}), "exports": exports}
+            session.commit()
+            reference = build.image_ref
+        log = lambda line: self._emit(build_id, line)  # noqa: E731
+        try:
+            size = self.backend.export(reference, target, log, archive_format=archive_format)
+            readable_artifact(target)
+            entry = {"status": "ready", "path": str(target), "size": size, "sha256": sha256_file(target),
+                     "format": archive_format}
+        except Exception as exc:
+            entry = {"status": "failed", "path": str(target), "error": str(exc)[:2000], "format": archive_format}
+        with self.session_factory() as session:
+            build = session.get(Build, build_id)
+            exports = dict((build.aiml or {}).get("exports") or {})
+            exports[archive_format] = entry
+            build.aiml = {**(build.aiml or {}), "exports": exports}
+            session.commit()
+        if entry["status"] != "ready":
+            raise BuildError(entry["error"])
+        return target
+
+    def _aiml_bundle(self, build: Build, recipe: dict, staging: Path, archive: str) -> None:
+        """aiml/: offline README, packages and lock, a CycloneDX SBOM and the test script."""
+        from layersmith.aiml import export, render as aiml_render
+
+        target = staging / "aiml"
+        target.mkdir()
+        (target / "README.md").write_text(export.readme(build, recipe, archive, build.export_sha256),
+                                          encoding="utf-8")
+        (target / "packages.json").write_text(json.dumps(export.packages(build, recipe), indent=2) + "\n",
+                                              encoding="utf-8")
+        (target / "requirements.lock").write_text(export.lock(build), encoding="utf-8")
+        (target / "sbom.cdx.json").write_text(json.dumps(export.sbom(build, recipe), indent=2) + "\n",
+                                              encoding="utf-8")
+        (target / "checks.json").write_text(json.dumps(build.checks or {}, indent=2, default=str) + "\n",
+                                            encoding="utf-8")
+        shutil.copy2(aiml_render.CHECK_SCRIPT, target / "layersmith-aiml-check")
+        (target / "layersmith-aiml-check").chmod(0o755)
+
     # -------------------------------------------------------- air-gap
 
     def _training_bundle(self, build: Build, recipe: dict, staging: Path, archive: str, scanned: bool) -> None:
@@ -561,6 +702,10 @@ class BuildService:
             (staging / "source").mkdir()
 
             shutil.copy2(export, staging / "image" / export.name)
+            if build.export_sha256:
+                # For `sha256sum -c` right next to the archive, the way the download offers it.
+                (staging / "image" / f"{export.name}.sha256").write_text(
+                    f"{build.export_sha256}  {export.name}\n", encoding="utf-8")
             (staging / "metadata" / "manifest.json").write_text(
                 json.dumps(manifest_for(project, build, build.export_sha256), indent=2) + "\n", encoding="utf-8")
             (staging / "source" / "Containerfile").write_text(build.containerfile, encoding="utf-8")
@@ -572,7 +717,10 @@ class BuildService:
                                            "                           separately (models, data), check results\n"
                                            if training_recipe(build.spec) else "")
                                     + ("  gpu-benchmark/README.md Getting started and runtime requirements\n"
-                                       if gpu_benchmark_recipe(build.spec) else "")),
+                                       if gpu_benchmark_recipe(build.spec) else "")
+                                    + ("  aiml/README.md          Load, run and test on the GPU host; Slurm\n"
+                                       "  aiml/sbom.cdx.json       CycloneDX SBOM; packages.json, requirements.lock\n"
+                                       if aiml_recipe(build.spec) else "")),
                 encoding="utf-8")
 
             # What was known about this image when it was bundled. Absent
@@ -598,6 +746,10 @@ class BuildService:
                     {key: gpu_recipe.get(key) for key in ("cuda_version", "python_full_version", "tools",
                                                           "torch", "vllm", "transformers", "tokenizers",
                                                           "nccl_tests")}, indent=2) + "\n", encoding="utf-8")
+
+            ai_recipe = aiml_recipe(build.spec)
+            if ai_recipe:
+                self._aiml_bundle(build, ai_recipe, staging, f"image/{export.name}")
 
             sums = []
             for path in sorted(staging.rglob("*")):
