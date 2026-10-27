@@ -100,7 +100,23 @@ class CliBackend:
             return False, f"{self.binary} is not usable: {exc}"
         return True, f"{self.binary} {version}"
 
+    @staticmethod
+    def _by_digest(reference: str) -> str:
+        """name:tag@sha256:... -> name@sha256:...
+
+        The digest alone identifies the image; Podman accepts a tag next to
+        it, Docker's pull and inspect do not reliably, so it is dropped.
+        """
+        if "@" not in reference:
+            return reference
+        name, digest = reference.split("@", 1)
+        head, _, last = name.rpartition("/")
+        if ":" in last:
+            name = f"{head}/{last.split(':', 1)[0]}" if head else last.split(":", 1)[0]
+        return f"{name}@{digest}"
+
     def resolve_base(self, reference: str, architecture: str, on_log: LogSink) -> str:
+        reference = self._by_digest(reference)
         self._run(["pull", *self._platform_args(architecture), reference], on_log=on_log, timeout=45 * 60)
         digest = self._digest_of(self._inspect_json(reference))
         if not digest:

@@ -257,7 +257,8 @@ export function AiMlPanel({ build, onChange, reload }: { build: Build; onChange:
                       <a href={api.downloadUrl(build.id, "export.sha256")}>.sha256</a></>}
                   </td>
                 </tr>
-                <tr>
+                {/* A Docker backend already writes a Docker archive; only Podman's OCI export needs the second format. */}
+                {primary.format?.startsWith("OCI") && <tr>
                   <td data-label="Archive" className="mono">{docker?.archive ?? primary.archive.replace(/\.tar$/, ".docker.tar")}</td>
                   <td data-label="Format">Docker archive (podman load reads both)</td>
                   <td data-label="Size">{docker?.size ? formatBytes(docker.size) : "—"}</td>
@@ -270,7 +271,7 @@ export function AiMlPanel({ build, onChange, reload }: { build: Build; onChange:
                       <button onClick={exportDocker}>Export</button>
                     )}
                   </td>
-                </tr>
+                </tr>}
               </tbody>
             </table>
             {docker?.status === "failed" && <Banner>{docker.error}</Banner>}

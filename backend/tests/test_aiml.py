@@ -601,3 +601,13 @@ def test_export_helpers_without_a_basic_test():
     assert export.lock(Row) == ""
     assert export.packages(Row, recipe)["source"].startswith("not available")
     assert export.sbom(Row, recipe)["components"][0]["type"] == "container"
+
+
+def test_backends_pull_pinned_bases_by_digest_alone():
+    from layersmith.backends.cli import CliBackend
+
+    digest = "sha256:" + "a" * 64
+    assert CliBackend._by_digest(f"nvcr.io/nvidia/pytorch:26.09-py3@{digest}") == f"nvcr.io/nvidia/pytorch@{digest}"
+    assert CliBackend._by_digest(f"localhost:5000/x/y:1@{digest}") == f"localhost:5000/x/y@{digest}"
+    assert CliBackend._by_digest(f"ubuntu@{digest}") == f"ubuntu@{digest}"
+    assert CliBackend._by_digest("ubuntu:24.04") == "ubuntu:24.04"
