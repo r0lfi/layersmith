@@ -30,11 +30,13 @@ interface Progress {
  * files are handed to the browser's own download list one after another.
  * Checksums are verified on the GPU host by setup.sh and the install scripts.
  */
-export function DownloadAllButton({ files, label = "Download all", nextStep = "bash setup.sh" }: {
+export function DownloadAllButton({ files, label = "Download all", nextStep = "bash setup.sh", host = "GPU host" }: {
   files: DownloadFile[];
   label?: string;
-  /** What to run on the GPU host once the folder is copied there. */
+  /** What to run on the target host once the folder is copied there. */
   nextStep?: string;
+  /** Where the folder goes, as the finished message names it. */
+  host?: string;
 }) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
@@ -86,7 +88,7 @@ export function DownloadAllButton({ files, label = "Download all", nextStep = "b
       const where = directory.name ? `the folder “${directory.name}”` : "the chosen folder";
       setMessage({ error: false, text: `All ${files.length} files are in ${where}` +
         (skipped ? ` (${skipped} were already there).` : ".") +
-        ` Copy the folder to the GPU host and run: ${nextStep}` });
+        ` Copy the folder to the ${host} and run: ${nextStep}` });
     } catch (exc) {
       const stopped = controller.signal.aborted;
       setMessage({ error: !stopped, text: stopped

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, formatDecimalBytes, SplitStatus } from "../api";
 import { Banner, usePoll } from "./ui";
+import { DownloadAllButton } from "./DownloadAll";
 
 /** Status of a build's split download, polled while the server computes it. */
 export function useSplit(buildId: string, enabled: boolean) {
@@ -96,6 +97,11 @@ export function SplitFiles({ buildId, split }: { buildId: string; split: Split }
         <span className="mono">{status.script}</span>; nothing else is needed on the receiving host but bash
         and coreutils.
       </p>
+      <div style={{ marginBottom: "0.8rem" }}>
+        <DownloadAllButton
+          files={[...parts, ...extras].map((file) => ({ ...file, url: api.splitFileUrl(buildId, file.name) }))}
+          nextStep={`bash ${status.script} --load`} host="receiving host" />
+      </div>
       <table className="table">
         <thead>
           <tr><th>File</th><th>Size</th><th>SHA-256</th><th></th></tr>
