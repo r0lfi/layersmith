@@ -1,0 +1,33 @@
+# shellcheck shell=bash
+# Bash completion for the OpenShift Admin Toolkit commands and kubectx/kubens.
+# Contexts come from the local kubeconfig; nodes and namespaces from the cluster.
+
+_oa_contexts() { kubectl config get-contexts -o name 2>/dev/null; }
+
+_oa_complete() {
+  local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
+  local words=''
+  case ${COMP_WORDS[0]} in
+    oc-context | kubectx)
+      if [ "$prev" = -n ] || [ "$prev" = --namespace ]; then
+        words=$(kubectl get namespaces -o name --request-timeout=5s 2>/dev/null | sed 's|^namespace/||')
+      else
+        words="$(_oa_contexts) --current --files -n"
+      fi ;;
+    kubens)
+      words=$(kubectl get namespaces -o name --request-timeout=5s 2>/dev/null | sed 's|^namespace/||') ;;
+    oc-debug-node)
+      words="$(kubectl get nodes -o name --request-timeout=5s 2>/dev/null | sed 's|^node/||') -y --image" ;;
+  esac
+  mapfile -t COMPREPLY < <(compgen -W "$words" -- "$cur")
+}
+
+complete -F _oa_complete oc-context oc-debug-node kubectx kubens
+complete -W "nodes pods pending operators all --help" oc-gpu
+complete -W "platform serving vllm all -n --help" oc-ai
+complete -W "--all -n --help" oc-storage
+complete -W "-A -n --help" oc-routes
+complete -W "-n -A --since --tail --errors -f -l --problems --help" oc-logs
+complete -W "gpu alerts --help" oc-prom
+complete -W "ca kubeconfig podman --help" openshift-admin-help
+complete -W "--json --help" openshift-admin-versions

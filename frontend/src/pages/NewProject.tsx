@@ -5,6 +5,7 @@ import { Banner, Card, Field, useLoad } from "../components/ui";
 import TrainingWizard from "./TrainingWizard";
 import GpuBenchmarkWizard from "./GpuBenchmarkWizard";
 import AiMlWizard from "./AiMlWizard";
+import OpenShiftWizard from "./OpenShiftWizard";
 
 const STEPS = ["Purpose", "Base", "Version", "Tools", "Packages", "Files", "Scripts", "Image", "Review"] as const;
 
@@ -67,6 +68,8 @@ const CATEGORIES = [
   { id: "general", name: "General purpose", description: "Shells, admin, network, development and cluster tools" },
   { id: "ai-ml", name: "AI / ML / GPU",
     description: "NVIDIA PyTorch, CUDA, vLLM and TensorFlow images for Podman and Slurm, exported for air-gapped GPU clusters" },
+  { id: "openshift", name: "OpenShift Admin Toolkit",
+    description: "oc, kubectl, Helm, k9s, OpenShift AI and GPU tools in one rootless image for Podman and Distrobox" },
   { id: "llm-training", name: "LLM Training & Fine-tuning",
     description: "Ready-to-run environments for fine-tuning and training language models" },
   { id: "gpu-benchmark", name: "NVIDIA GPU & LLM Benchmark",
@@ -75,7 +78,7 @@ const CATEGORIES = [
 
 export default function NewProject() {
   const [params, setParams] = useSearchParams();
-  const category = ["ai-ml", "llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
+  const category = ["ai-ml", "openshift", "llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
     ? params.get("category")! : "general";
   const setCategory = (id: string) =>
     setParams((current) => {
@@ -101,6 +104,8 @@ export default function NewProject() {
       </div>
       {category === "ai-ml" ? (
         <AiMlWizard onLeave={() => setCategory("general")} />
+      ) : category === "openshift" ? (
+        <OpenShiftWizard onLeave={() => setCategory("general")} />
       ) : category === "llm-training" ? (
         <TrainingWizard onLeave={() => setCategory("general")} />
       ) : category === "gpu-benchmark" ? (

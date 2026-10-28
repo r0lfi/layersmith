@@ -1,0 +1,70 @@
+#!/bin/bash
+# StorageClasses, PVCs that are not Bound, and PVC usage per namespace.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-storage [--all] [-n NAMESPACE]
+
+StorageClasses (the default marked), VolumeSnapshotClasses, PVCs that are not
+Bound, and requested capacity per namespace. --all lists every PVC."
+oa_usage "$usage" "$@"
+oa_need oc jq
+
+ns='' every=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --all) every=1 ;;
+    -n | --namespace) ns=${2:-}; shift ;;
+    *) oa_die 64 "$usage" ;;
+  esac
+  shift
+done
+
+oa_require_login
+oa_prod_banner
+
+oa_head "StorageClasses"
+oc_ get storageclasses -o json 2>/dev/null | jq -r '.items[] | [
+    (.metadata.name + (if .metadata.annotations["storageclass.kubernetes.io/is-default-class"] == "true" then " (default)" else "" end)),
+    .provisioner, (.reclaimPolicy // "Delete"), (.volumeBindingMode // "Immediate"), (.allowVolumeExpansion // false | tostring)]
+  | @tsv' | (printf 'NAME\tPROVISIONER\tRECLAIM\tBINDING\tEXPANSION\n'; cat) | oa_table
+
+if oa_has_api snapshot.storage.k8s.io; then
+  oa_head "VolumeSnapshotClasses"
+  oc_ get volumesnapshotclasses -o json 2>/dev/null | jq -r '.items[] | [.metadata.name, .driver, .deletionPolicy] | @tsv' \
+    | (printf 'NAME\tDRIVER\tDELETION\n'; cat) | oa_table
+fi
+
+mapfile -t scope < <(oa_scope_args "$ns" 0 persistentvolumeclaims)
+if ! pvcs=$(oc_ get pvc "${scope[@]}" -o json 2>/dev/null); then
+  oa_die 4 "Not allowed to list PVCs (${scope[*]})"
+fi
+
+oa_head "PVCs that are not Bound (${scope[*]})"
+out=$(jq -r '.items[] | select(.status.phase != "Bound")
+  | [.metadata.namespace, .metadata.name, .status.phase, (.spec.storageClassName // "-"), .spec.resources.requests.storage] | @tsv' <<<"$pvcs")
+problems=0
+if [ -n "$out" ]; then
+  { printf 'NAMESPACE\tPVC\tSTATUS\tSTORAGECLASS\tREQUEST\n'; printf '%s\n' "$out"; } | oa_table
+  problems=1
+else
+  oa_ok "All $(jq '.items | length' <<<"$pvcs") PVCs are Bound"
+fi
+
+oa_head "Requested capacity per namespace"
+# Quantities are normalised to GiB (Ki/Mi/Gi/Ti and the decimal k/M/G/T suffixes).
+jq -r 'def gib: capture("^(?<n>[0-9.]+)(?<u>[A-Za-z]*)$") as $q | ($q.n | tonumber) *
+        ({"": 1/1073741824, "Ki": 1/1048576, "Mi": 1/1024, "Gi": 1, "Ti": 1024, "Pi": 1048576,
+          "k": 1000/1073741824, "M": 1e6/1073741824, "G": 1e9/1073741824, "T": 1e12/1073741824}[$q.u] // 0);
+  [.items[] | {ns: .metadata.namespace, size: (.status.capacity.storage // .spec.resources.requests.storage // "0" | gib)}]
+  | group_by(.ns)[] | [.[0].ns, (length | tostring), ((map(.size) | add * 10 | round / 10 | tostring) + " GiB")] | @tsv' <<<"$pvcs" \
+  | sort -t$'\t' -k1,1 | (printf 'NAMESPACE\tPVCS\tCAPACITY\n'; cat) | oa_table
+
+if [ "$every" = 1 ]; then
+  oa_head "All PVCs"
+  jq -r '.items[] | [.metadata.namespace, .metadata.name, .status.phase, (.status.capacity.storage // "-"),
+      (.spec.accessModes | join(",")), (.spec.storageClassName // "-"), (.spec.volumeName // "-")] | @tsv' <<<"$pvcs" \
+    | (printf 'NAMESPACE\tPVC\tSTATUS\tCAPACITY\tACCESS\tSTORAGECLASS\tVOLUME\n'; cat) | oa_table
+fi
+exit "$problems"

@@ -95,6 +95,15 @@ def aiml_recipe(spec: dict | None) -> dict | None:
     return recipes.resolve(spec["aiml"])
 
 
+def openshift_recipe(spec: dict | None) -> dict | None:
+    """The resolved recipe of an OpenShift Admin Toolkit build, or None for any other build."""
+    if not (spec or {}).get("openshift"):
+        return None
+    from layersmith.openshift import recipes
+
+    return recipes.resolve(spec["openshift"])
+
+
 def gpu_benchmark_storage(recipe: dict | None = None) -> dict:
     """Free space where images are exported, against what a GPU benchmark (or AI/ML) build needs.
 
@@ -133,6 +142,7 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
     recipe = training_recipe(build.spec)
     gpu_recipe = gpu_benchmark_recipe(build.spec)
     ai_recipe = aiml_recipe(build.spec)
+    os_recipe = openshift_recipe(build.spec)
     training = None
     if recipe:
         training = {"profile": recipe["profile"], "profile_version": recipe["profile_version"],
@@ -172,7 +182,19 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
                      "verified_base": ai_recipe["base"]["verified"],
                      "basic_test": (((build.checks or {}).get("results") or {}).get("basic") or {}).get("status")}}
            if ai_recipe else {}),
+        **({"openshift": {**_openshift_summary(os_recipe),
+                          "checks": {k: v.get("status") for k, v in ((build.checks or {}).get("results") or {}).items()},
+                          "tools_installed": {t.get("binary"): t.get("version") for t in
+                                              ((((build.checks or {}).get("results") or {}).get("user") or {})
+                                               .get("info") or {}).get("tools") or []}}}
+           if os_recipe else {}),
     }
+
+
+def _openshift_summary(recipe: dict) -> dict:
+    from layersmith.openshift import recipes
+
+    return recipes.summary(recipe)
 
 
 def extra_export_paths(build: Build) -> list[str]:
@@ -343,6 +365,11 @@ class BuildService:
             from layersmith.aiml import render as aiml_render
 
             aiml_render.write_context(context, ai_recipe)
+        os_recipe = openshift_recipe(build.spec)
+        if os_recipe:
+            from layersmith.openshift import docs, render as os_render
+
+            os_render.write_context(context, os_recipe, docs.markdown(os_recipe, build.image_ref or "IMAGE"))
         return context
 
     # --------------------------------------------------------------- run
@@ -406,6 +433,8 @@ class BuildService:
                     build.checks = self.run_checks(build_id, reference)
                 if ai_recipe:
                     build.checks = self.run_aiml_checks(build_id, reference, ai_recipe)
+                if openshift_recipe(build.spec):
+                    build.checks = self.run_openshift_checks(build_id, reference)
 
                 self._set_status(build_id, "exporting")
                 export = Path(self.settings.image_dir) / export_filename(project_snapshot["repository"],
@@ -594,6 +623,50 @@ class BuildService:
         self._emit(build_id, f"Basic test: {result['status'].upper()}")
         return {"results": results}
 
+    def run_openshift_checks(self, build_id: str, reference: str) -> dict:
+        """The image check as root and the user check as an unprivileged uid; never fails the build."""
+        from layersmith.openshift import checks, render as os_render
+
+        runner = getattr(self.backend, "run_container", None)
+        if runner is None:
+            self._emit(build_id, f"NOTE: the {self.backend.name} backend cannot run containers; checks not run")
+            return {"results": {}}
+        self._set_status(build_id, "testing")
+        results = {}
+        for run in os_render.check_runs():
+            who = f"as {run['user']}" if run["user"] else "as root"
+            self._emit(build_id, f"--> Check: {run['id']} ({who}, networking disabled, capabilities dropped)")
+            try:
+                code, output = runner(reference, run["argv"], lambda line: self._emit(build_id, line),
+                                      timeout=run["timeout"], user=run["user"])
+            except Exception as exc:  # the runtime itself failed; record it like a failed check
+                code, output = 1, str(exc)
+            result = checks.parse_output(output)
+            if result is None:
+                result = {"check": run["id"], "status": "failed", "info": {},
+                          "steps": [{"name": "run", "status": "failed",
+                                     "detail": f"no result line (exit status {code}): {output[-300:]}"}]}
+            result["source"] = "layersmith"
+            results[run["id"]] = result
+            self._emit(build_id, f"Check {run['id']}: {result['status'].upper()}")
+            with self.session_factory() as session:  # visible while the next check runs
+                row = session.get(Build, build_id)
+                row.checks = {"results": dict(results)}
+                session.commit()
+        return {"results": results}
+
+    def _openshift_bundle(self, build: Build, recipe: dict, staging: Path, archive: str) -> None:
+        """openshift/: README, Distrobox Assemble manifest, installed versions and check results."""
+        from layersmith.openshift import docs
+
+        target = staging / "openshift"
+        target.mkdir()
+        image = build.image_ref or "IMAGE"
+        (target / "README.md").write_text(docs.markdown(recipe, image, archive), encoding="utf-8")
+        (target / f"{docs.CONTAINER}.ini").write_text(docs.distrobox_ini(recipe, image), encoding="utf-8")
+        (target / "checks.json").write_text(json.dumps((build.checks or {}).get("results") or {}, indent=2) + "\n",
+                                            encoding="utf-8")
+
     def export_format(self, build_id: str, archive_format: str) -> Path:
         """Write the image once more in another archive format (e.g. docker-archive) next to the export."""
         if archive_format not in getattr(self.backend, "archive_formats", ()):
@@ -720,7 +793,10 @@ class BuildService:
                                        if gpu_benchmark_recipe(build.spec) else "")
                                     + ("  aiml/README.md          Load, run and test on the GPU host; Slurm\n"
                                        "  aiml/sbom.cdx.json       CycloneDX SBOM; packages.json, requirements.lock\n"
-                                       if aiml_recipe(build.spec) else "")),
+                                       if aiml_recipe(build.spec) else "")
+                                    + ("  openshift/README.md     Distrobox and Podman, clusters, commands, versions\n"
+                                       "  openshift/openshift-admin.ini  distrobox assemble create --file ...\n"
+                                       if openshift_recipe(build.spec) else "")),
                 encoding="utf-8")
 
             # What was known about this image when it was bundled. Absent
@@ -750,6 +826,9 @@ class BuildService:
             ai_recipe = aiml_recipe(build.spec)
             if ai_recipe:
                 self._aiml_bundle(build, ai_recipe, staging, f"image/{export.name}")
+            os_recipe = openshift_recipe(build.spec)
+            if os_recipe:
+                self._openshift_bundle(build, os_recipe, staging, f"image/{export.name}")
 
             sums = []
             for path in sorted(staging.rglob("*")):

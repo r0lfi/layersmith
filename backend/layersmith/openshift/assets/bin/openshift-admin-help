@@ -1,0 +1,70 @@
+#!/bin/bash
+# What the OpenShift Admin Toolkit offers, and short how-tos.
+set -uo pipefail
+DOC=/usr/share/doc/openshift-admin/README.md
+
+case "${1:-}" in
+  ca)
+    cat <<'EOF'
+Trusting a cluster CA (never skip TLS verification):
+
+  Per login:   oc login --certificate-authority=/path/to/ca.crt https://api.<cluster>:6443
+  In the image (Distrobox, as your user):
+               sudo cp ca.crt /etc/pki/ca-trust/source/anchors/<cluster>.crt && sudo update-ca-trust
+  From the host's trust store, when creating the container:
+               --volume /etc/pki/ca-trust/source/anchors:/etc/pki/ca-trust/source/anchors:ro
+               (then: sudo update-ca-trust)
+  The cluster's own ingress CA (for routes) once logged in:
+               oc get configmap default-ingress-cert -n openshift-config-managed \
+                 -o jsonpath='{.data.ca-bundle\.crt}' > ingress-ca.crt
+EOF
+    ;;
+  kubeconfig)
+    cat <<'EOF'
+Several clusters:
+
+  ~/.kube/config                 written by `oc login`; current-context is stored here
+  ~/.kube/clusters/*.yaml        one kubeconfig per cluster (also *.yml, *.kubeconfig)
+
+When KUBECONFIG is not set, the shell profile sets it to ~/.kube/config plus every
+file in ~/.kube/clusters/ (OPENSHIFT_ADMIN_KUBECONFIG_AUTOLOAD=0 turns this off).
+Set KUBECONFIG yourself to use something else. Nothing is ever stored in the image.
+
+  oc-context                 list contexts (PROD marks production)
+  oc-context ai-prod         switch (a unique part of the name is enough)
+  oc-context -n my-project   set the namespace
+  oc login https://api.<cluster>:6443   adds a context to ~/.kube/config
+EOF
+    ;;
+  podman)
+    cat <<'EOF'
+Containers inside the toolkit:
+
+  skopeo inspect / copy, podman pull / images / save   work rootless
+  Building images inside Distrobox needs nested user namespaces (subuid/subgid for
+  your user inside the container and fuse-overlayfs); it is not configured by default.
+
+  The explicit alternative: use the host's Podman
+      host-podman build -t localhost/app:1 .      (Distrobox only; runs on the host)
+  The Podman socket is never mounted automatically.
+EOF
+    ;;
+  "" | -h | --help)
+    cat <<'EOF'
+OpenShift Admin Toolkit
+
+  oc-status          cluster overview          oc-health         operators, MCPs, nodes
+  oc-gpu             GPUs, GPU pods, operators oc-ai             OpenShift AI, model serving, vLLM
+  oc-storage         StorageClasses, PVCs      oc-routes         Routes and Ingresses
+  oc-logs            logs, --errors, --problems
+  oc-context         list / switch contexts    oc-debug-node     debug shell on a node
+  oc-version-check   client vs cluster         oc-prom           PromQL (gpu, alerts)
+  openshift-admin-versions   installed tools   host-podman       the host's Podman (Distrobox)
+
+  Aliases: k, ocnodes, ocpods, ochealth, ocmcp, ocgpu
+  Every command has --help. Topics: openshift-admin-help ca | kubeconfig | podman
+EOF
+    [ -r "$DOC" ] && echo "  Full documentation: less $DOC"
+    ;;
+  *) echo "Topics: ca, kubeconfig, podman" >&2; exit 64 ;;
+esac

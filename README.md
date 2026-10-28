@@ -118,6 +118,15 @@ and shows you the Containerfile it produced before anything is built.
   export carries a CycloneDX SBOM and package list, and the build page
   generates Slurm batch scripts that give Podman exactly the GPUs Slurm
   allocated. See [docs/ai-ml.md](docs/ai-ml.md).
+- **OpenShift Admin Toolkit** — a rootless AlmaLinux 10 admin image for
+  Podman and Distrobox: oc and kubectl from Red Hat's signed client release
+  (4.22 by default), oc-mirror, opm, operator-sdk, Helm, kustomize, k9s, stern,
+  kubectx/kubens, yq, podman/buildah/skopeo and ansible-core, every download
+  pinned by sha256. Adds `oc-status`, `oc-gpu`, `oc-ai` and other helpers for
+  OpenShift AI and NVIDIA GPU clusters, multi-cluster kubeconfigs with a
+  production marker, and a Distrobox Assemble manifest. Checks after each build
+  prove the tools and versions as a non-root user and that no kubeconfig or
+  credential is in any layer. See [docs/openshift-admin.md](docs/openshift-admin.md).
 - **NVIDIA GPU & LLM Benchmark** — a Quick build that produces one offline
   Podman image with an interactive terminal dashboard: live GPU status, LLM
   token speed and latency with vLLM on local models, GEMM compute, memory

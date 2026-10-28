@@ -1,0 +1,55 @@
+#!/bin/bash
+# PromQL against the cluster monitoring stack (Thanos Querier), without putting the token in argv.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-prom 'PROMQL'
+       oc-prom gpu        GPU utilisation and memory per GPU (NVIDIA DCGM exporter)
+       oc-prom alerts     firing alerts
+
+Queries Thanos Querier through its route in openshift-monitoring with your
+token (needs a token login: 'oc login', not a client-certificate kubeconfig,
+and the cluster-monitoring-view role or more). The token goes to curl through a
+file descriptor, never on the command line. TLS is verified against the
+cluster's ingress CA (read from openshift-config-managed) and the system trust store."
+oa_usage "$usage" "$@"
+oa_need oc jq curl
+[ $# -eq 1 ] || oa_die 64 "$usage"
+
+case $1 in
+  gpu) query='label_replace(avg by (Hostname, gpu, modelName) (DCGM_FI_DEV_GPU_UTIL), "metric", "util %", "", "") or label_replace(avg by (Hostname, gpu, modelName) (DCGM_FI_DEV_FB_USED), "metric", "memory MiB", "", "")' ;;
+  alerts) query='ALERTS{alertstate="firing"}' ;;
+  *) query=$1 ;;
+esac
+
+oa_require_login
+token=$(oc whoami -t 2>/dev/null) || oa_die 2 "No token: log in with 'oc login' (a client-certificate kubeconfig has no token for the monitoring route)."
+host=$(oc_ get route thanos-querier -n openshift-monitoring -o jsonpath='{.spec.host}' 2>/dev/null) \
+  || oa_die 4 "Cannot read the thanos-querier route in openshift-monitoring (not OpenShift, or not allowed)."
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+tls=()
+if oc_ get configmap default-ingress-cert -n openshift-config-managed -o jsonpath='{.data.ca-bundle\.crt}' >"$work/ca.crt" 2>/dev/null \
+    && [ -s "$work/ca.crt" ]; then
+  cat /etc/pki/tls/certs/ca-bundle.crt "$work/ca.crt" >"$work/trust.crt" 2>/dev/null
+  tls=(--cacert "$work/trust.crt")
+fi
+
+response=$(curl -sS --proto '=https' --max-time 30 "${tls[@]}" \
+  -H @<(printf 'Authorization: Bearer %s\n' "$token") \
+  --data-urlencode "query=$query" "https://$host/api/v1/query") || oa_die 3 "Query failed (see the curl error above)."
+unset token
+
+if [ "$(jq -r '.status // "error"' <<<"$response" 2>/dev/null)" != success ]; then
+  oa_die 1 "Prometheus: $(jq -r '.error // .' <<<"$response" 2>/dev/null | head -c 400)"
+fi
+count=$(jq '.data.result | length' <<<"$response")
+if [ "$count" -eq 0 ]; then
+  [ "$1" = gpu ] && echo "No DCGM metrics: is the GPU Operator's dcgm-exporter running and monitored? (oc-gpu operators)" && exit 0
+  echo "No series."
+  exit 0
+fi
+jq -r '.data.result[] | [(.metric | del(.__name__) | to_entries | map("\(.key)=\(.value)") | join(" ")), .value[1]] | @tsv' <<<"$response" \
+  | sort | oa_table

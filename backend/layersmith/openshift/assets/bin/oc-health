@@ -1,0 +1,63 @@
+#!/bin/bash
+# ClusterOperator, MachineConfigPool and node health. Exit 1 when anything is degraded.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+oa_usage "Usage: oc-health
+Every ClusterOperator with Available/Progressing/Degraded, MachineConfigPools and
+nodes that are not Ready. Exits 1 when something is degraded or unavailable." "$@"
+
+oa_need oc jq
+oa_require_login
+oa_prod_banner
+problems=0
+
+if oa_has_api config.openshift.io; then
+  oa_head "Cluster operators"
+  if co=$(oc_ get clusteroperators -o json 2>/dev/null); then
+    jq -r '.items[] | ([.status.conditions[]? | {(.type): .status}] | add // {}) as $c
+      | [.metadata.name, ([.status.versions[]? | select(.name == "operator") | .version][0] // "-"),
+         $c.Available // "?", $c.Progressing // "?", $c.Degraded // "?",
+         ([.status.conditions[]? | select((.type == "Degraded" and .status == "True") or (.type == "Available" and .status != "True")) | .message][0] // "" | .[0:100])]
+      | @tsv' <<<"$co" | (printf 'NAME\tVERSION\tAVAILABLE\tPROGRESSING\tDEGRADED\tMESSAGE\n'; cat) | oa_table
+    if jq -e '[.items[] | ([.status.conditions[]? | {(.type): .status}] | add // {}) | select(.Available != "True" or .Degraded == "True")] | length > 0' <<<"$co" >/dev/null; then
+      problems=1
+    fi
+  else
+    oa_warn "Not allowed to read cluster operators"
+  fi
+fi
+
+if oa_has_api machineconfiguration.openshift.io; then
+  oa_head "Machine config pools"
+  if mcp=$(oc_ get machineconfigpools -o json 2>/dev/null); then
+    jq -r '.items[] | ([.status.conditions[]? | {(.type): .status}] | add // {}) as $c
+      | [.metadata.name, "\(.status.updatedMachineCount // 0)/\(.status.machineCount // 0)",
+         $c.Updated // "?", $c.Updating // "?", $c.Degraded // "?"] | @tsv' <<<"$mcp" \
+      | (printf 'POOL\tUPDATED\tUPDATED?\tUPDATING\tDEGRADED\n'; cat) | oa_table
+    if jq -e 'any(.items[]; any(.status.conditions[]?; .type == "Degraded" and .status == "True"))' <<<"$mcp" >/dev/null; then
+      problems=1
+    fi
+  else
+    oa_warn "Not allowed to read machine config pools"
+  fi
+fi
+
+oa_head "Nodes that are not Ready or have pressure"
+if nodes=$(oc_ get nodes -o json 2>/dev/null); then
+  out=$(jq -r '.items[] | . as $n | .status.conditions[]
+    | select((.type == "Ready" and .status != "True") or (.type != "Ready" and .status == "True"))
+    | [$n.metadata.name, .type, .status, (.message // "" | .[0:100])] | @tsv' <<<"$nodes")
+  if [ -n "$out" ]; then
+    { printf 'NODE\tCONDITION\tSTATUS\tMESSAGE\n'; printf '%s\n' "$out"; } | oa_table
+    problems=1
+  else
+    oa_ok "All nodes Ready, no pressure conditions"
+  fi
+else
+  oa_warn "Not allowed to list nodes"
+fi
+
+[ "$problems" -eq 0 ] && oa_ok "Healthy" || printf '%s\n' "${OA_RED}Problems found${OA_OFF}"
+exit "$problems"

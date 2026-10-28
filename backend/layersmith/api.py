@@ -60,6 +60,11 @@ from layersmith.aiml import render as aiml_render
 from layersmith.aiml import slurm as aiml_slurm
 from layersmith.aiml import upstream as aiml_upstream
 from layersmith.services.builds import aiml_recipe
+from layersmith.openshift import catalog as openshift_catalog
+from layersmith.openshift import checks as openshift_checks
+from layersmith.openshift import docs as openshift_docs
+from layersmith.openshift import recipes as openshift_recipes
+from layersmith.services.builds import openshift_recipe
 
 router = APIRouter(prefix="/api")
 
@@ -72,7 +77,7 @@ LOG_CHUNK_MAX_BYTES = 1024 * 1024
 
 #: Optional API additions a client can check for instead of guessing from the
 #: version. Additive only: a client must keep working without any of them.
-API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit", "aiml"]
+API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit", "aiml", "openshift"]
 
 
 # ------------------------------------------------------------- schemas
@@ -123,6 +128,10 @@ class AimlResolveIn(BaseModel):
     aiml: dict = Field(default_factory=dict)
     driver: str | None = None
     gpus: list[str] | None = None
+
+
+class OpenShiftResolveIn(BaseModel):
+    openshift: dict = Field(default_factory=dict)
 
 
 class AimlLintIn(BaseModel):
@@ -198,6 +207,7 @@ def _build_json(build: Build, project: Project | None = None) -> dict:
         "duration_seconds": build.duration_seconds,
         "training_profile": ((build.spec or {}).get("training") or {}).get("profile"),
         "aiml_template": ((build.spec or {}).get("aiml") or {}).get("template"),
+        "openshift_ocp": ((build.spec or {}).get("openshift") or {}).get("ocp_version"),
     }
 
 
@@ -289,6 +299,45 @@ def _aiml_detail(build: Build, backend: str = "podman") -> dict | None:
         "slurm_defaults": {**aiml_slurm.DEFAULTS, "job_name": f"{recipe['template']}-gpu"[:63]},
         "target": aiml_catalog.TARGET,
     }
+
+
+def _openshift_detail(build: Build, backend: str = "podman") -> dict | None:
+    """Recipe, check results, installed versions, commands and downloads of an OpenShift Admin Toolkit build."""
+    try:
+        recipe = openshift_recipe(build.spec)
+    except openshift_catalog.OpenShiftError as exc:  # a saved request this version no longer offers
+        return {"error": str(exc)}
+    if recipe is None:
+        return None
+    image = build.image_ref or "IMAGE"
+    archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+    tests = openshift_checks.summarise(build.status, build.checks)
+    base = f"/api/builds/{build.id}"
+    downloads = []
+    if build.status == "ready" and _downloadable(build.export_path):
+        downloads = [
+            {"name": archive, "kind": "part", "size": build.export_size, "sha256": build.export_sha256,
+             "url": f"{base}/download/export"},
+            {"name": f"{archive}.sha256", "kind": "checksum", "url": f"{base}/download/export.sha256"},
+            {"name": f"{openshift_docs.CONTAINER}.ini", "kind": "script",
+             "url": f"{base}/openshift/files/{openshift_docs.CONTAINER}.ini"},
+            {"name": "README.md", "kind": "script", "url": f"{base}/openshift/files/README.md"},
+        ]
+    return {
+        "recipe": recipe,
+        "tests": tests["rows"],
+        "tools_installed": tests["tools"],
+        "archive": archive,
+        "archive_format": ("OCI archive (podman save --format oci-archive)" if backend == "podman"
+                           else "Docker archive (docker save)"),
+        "commands": openshift_docs.commands(recipe, image, archive),
+        "distrobox_ini": openshift_docs.distrobox_ini(recipe, image),
+        "downloads": downloads,
+    }
+
+
+OPENSHIFT_FILES = {"README.md": "text/markdown", f"{openshift_docs.CONTAINER}.ini": "text/plain",
+                   "versions.json": "application/json", "checks.json": "application/json"}
 
 
 def _aiml_archive_name(build: Build) -> str:
@@ -588,6 +637,11 @@ def get_project(project_id: str, state=Depends(get_state)):
                     data["aiml"] = aiml_recipes.resolve(project.spec["aiml"])
                 except aiml_catalog.AimlError:
                     data["aiml"] = None
+            if project.spec.get("openshift"):
+                try:
+                    data["openshift"] = openshift_recipes.resolve(project.spec["openshift"])
+                except openshift_catalog.OpenShiftError:
+                    data["openshift"] = None
             if project.spec.get("training"):
                 try:
                     data["training"] = training_recipes.resolve(project.spec["training"],
@@ -718,7 +772,8 @@ def get_build(build_id: str, state=Depends(get_state)):
                 "manifest": manifest_for(project, build, build.export_sha256),
                 "training": _training_detail(build, scanned=_has_completed_scan(session, build.id)),
                 "gpu_benchmark": _gpu_benchmark_detail(build, state["build_service"].backend.name),
-                "aiml": _aiml_detail(build, state["build_service"].backend.name)}
+                "aiml": _aiml_detail(build, state["build_service"].backend.name),
+                "openshift": _openshift_detail(build, state["build_service"].backend.name)}
 
 
 @router.get("/builds/{build_id}/log")
@@ -1011,6 +1066,66 @@ def aiml_file(build_id: str, name: str, state=Depends(get_state)):
             archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
             body = aiml_export.readme(build, recipe, archive, build.export_sha256)
         return Response(body, media_type=AIML_FILES[name],
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/openshift/catalog")
+def openshift_catalog_view():
+    tools = {key: {k: v for k, v in tool.items() if k not in ("versions", "check")}
+             | {"versions": list(tool["versions"])} for key, tool in openshift_catalog.TOOLS.items()}
+    return {"profile": openshift_catalog.PROFILE, "category": openshift_catalog.CATEGORY,
+            "bases": openshift_catalog.BASES, "default_base": openshift_catalog.DEFAULT_BASE,
+            "ocp_releases": openshift_catalog.OCP_RELEASES, "default_ocp": openshift_catalog.DEFAULT_OCP,
+            "tools": tools, "package_groups": {k: {kk: vv for kk, vv in v.items() if kk != "check"}
+                                               for k, v in openshift_catalog.PACKAGE_GROUPS.items()},
+            "optional": openshift_catalog.OPTIONAL, "helpers": openshift_catalog.HELPERS,
+            "aliases": openshift_catalog.ALIASES, "defaults": openshift_catalog.DEFAULTS,
+            "tests": openshift_checks.TESTS, "sources": openshift_catalog.SOURCES,
+            "verified": openshift_catalog.VERIFIED}
+
+
+@router.post("/openshift/resolve")
+def openshift_resolve(payload: OpenShiftResolveIn):
+    """Validate a toolkit request. An invalid choice is an answer here, not an error."""
+    try:
+        recipe = openshift_recipes.resolve(payload.openshift)
+    except openshift_catalog.OpenShiftError as exc:
+        return {"ok": False, "error": str(exc)}
+    names = openshift_recipes.default_names(recipe)
+    image = f"{names['repository']}:{names['tag']}"
+    return {"ok": True, "recipe": recipe, "names": names,
+            "commands": openshift_docs.commands(recipe, image, "openshift-admin-1.0.0.tar")}
+
+
+@router.get("/builds/{build_id}/openshift/files/{name}")
+def openshift_file(build_id: str, name: str, state=Depends(get_state)):
+    if name not in OPENSHIFT_FILES:
+        raise HTTPException(404, "Unknown file")
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        try:
+            recipe = openshift_recipe(build.spec)
+        except openshift_catalog.OpenShiftError as exc:
+            raise HTTPException(409, str(exc))
+        if recipe is None:
+            raise HTTPException(404, "Not an OpenShift Admin Toolkit build")
+        image = build.image_ref or "IMAGE"
+        results = (build.checks or {}).get("results") or {}
+        if name == "README.md":
+            archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+            body = openshift_docs.markdown(recipe, image, archive)
+        elif name == "versions.json":
+            tools = ((results.get("user") or {}).get("info") or {}).get("tools")
+            if not tools:
+                raise HTTPException(404, "No versions recorded: the user check did not run for this build")
+            body = json.dumps(tools, indent=2) + "\n"
+        elif name == "checks.json":
+            body = json.dumps(results, indent=2) + "\n"
+        else:
+            body = openshift_docs.distrobox_ini(recipe, image)
+        return Response(body, media_type=OPENSHIFT_FILES[name],
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 

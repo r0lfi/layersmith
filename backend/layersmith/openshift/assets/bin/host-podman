@@ -1,0 +1,17 @@
+#!/bin/bash
+# Run the host's Podman from inside Distrobox. Explicit on purpose: the toolkit
+# never mounts the Podman socket, so nothing in the container can drive the
+# host's containers unless you call this.
+set -uo pipefail
+
+case "${1:-}" in
+  -h | --help)
+    echo "Usage: host-podman PODMAN-ARGS...   (e.g. host-podman build -t localhost/app:1 .)"
+    echo "Runs podman on the host through distrobox-host-exec; works inside Distrobox only."
+    exit 0 ;;
+esac
+if ! command -v distrobox-host-exec >/dev/null 2>&1; then
+  echo "host-podman works inside Distrobox only (distrobox-host-exec not found). Use podman directly." >&2
+  exit 127
+fi
+exec distrobox-host-exec podman "$@"

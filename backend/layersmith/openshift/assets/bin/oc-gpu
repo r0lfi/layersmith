@@ -1,0 +1,152 @@
+#!/bin/bash
+# GPU resources, GPU workloads and the operators that provide them (NVIDIA GPU Operator, NFD, Network Operator).
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-gpu [nodes|pods|pending|operators|all]   (default: all)
+
+  nodes      GPU model, capacity, allocatable and requested GPUs per node, MIG resources, taints
+  pods       pods that request nvidia.com/gpu, with requests and limits
+  pending    pods waiting for GPUs, with the scheduler's reason
+  operators  NVIDIA GPU Operator (ClusterPolicy), Node Feature Discovery,
+             NVIDIA Network Operator: versions, state and pods that are not running
+
+Requested GPUs are summed from the requests of non-terminated pods. No driver
+is installed in this image: drivers live on the GPU nodes, managed by the GPU Operator."
+oa_usage "$usage" "$@"
+oa_need oc jq
+what=${1:-all}
+case $what in nodes | pods | pending | operators | all) ;; *) oa_die 64 "$usage" ;; esac
+
+oa_require_login
+oa_prod_banner
+
+# Non-terminated pods across the cluster, read once.
+pods_json() {
+  if [ -z "${PODS_JSON:-}" ]; then
+    PODS_JSON=$(oc_ get pods -A --field-selector=status.phase!=Succeeded,status.phase!=Failed -o json 2>/dev/null) \
+      || PODS_JSON='{"items":[]}'
+  fi
+  printf '%s' "$PODS_JSON"
+}
+
+nodes() {
+  oa_head "GPU nodes"
+  local data requested
+  if ! data=$(oc_ get nodes -o json 2>/dev/null); then
+    oa_warn "Not allowed to list nodes"
+    return
+  fi
+  if ! jq -e 'any(.items[]; (.status.capacity // {}) | keys | any(startswith("nvidia.com/")))' <<<"$data" >/dev/null; then
+    echo "No node advertises nvidia.com/gpu (or MIG) resources."
+    echo "Either the cluster has no NVIDIA GPUs, or the GPU Operator's device plugin is not running: see 'oc-gpu operators'."
+    return
+  fi
+  requested=$(pods_json | jq -c 'reduce (.items[] | select(.spec.nodeName) | {node: .spec.nodeName,
+      gpus: ([.spec.containers[]?.resources.requests["nvidia.com/gpu"] // "0" | tonumber] | add // 0)}) as $p
+      ({}; .[$p.node] += $p.gpus)')
+  jq -r --argjson req "$requested" '.items[] | select((.status.capacity // {}) | keys | any(startswith("nvidia.com/")))
+    | [.metadata.name,
+       (.metadata.labels["nvidia.com/gpu.product"] // "-"),
+       (.metadata.labels["nvidia.com/gpu.memory"] // "-" | if . == "-" then . else "\((tonumber / 1024) | floor) GiB" end),
+       (.status.capacity["nvidia.com/gpu"] // "0"),
+       (.status.allocatable["nvidia.com/gpu"] // "0"),
+       ($req[.metadata.name] // 0 | tostring),
+       ([.status.allocatable | to_entries[] | select(.key | startswith("nvidia.com/mig-")) | "\(.key | sub("nvidia.com/"; ""))=\(.value)"] | join(",") | if . == "" then "-" else . end),
+       ([.spec.taints[]? | "\(.key)=\(.value // ""):\(.effect)"] | join(",") | if . == "" then "-" else . end)]
+    | @tsv' <<<"$data" | (printf 'NODE\tGPU PRODUCT\tMEMORY\tCAPACITY\tALLOCATABLE\tREQUESTED\tMIG\tTAINTS\n'; cat) | oa_table
+  jq -r '[.items[] | (.status.allocatable["nvidia.com/gpu"] // "0" | tonumber)] | add // 0 | "Allocatable GPUs in the cluster: \(.)"' <<<"$data"
+}
+
+pods() {
+  oa_head "Pods requesting GPUs"
+  local out
+  out=$(pods_json | jq -r '.items[] | select(any(.spec.containers[]?; .resources.limits["nvidia.com/gpu"] or .resources.requests["nvidia.com/gpu"]))
+    | [.metadata.namespace, .metadata.name, (.spec.nodeName // "-"), .status.phase,
+       ([.spec.containers[]?.resources.requests["nvidia.com/gpu"] // "0" | tonumber] | add | tostring),
+       ([.spec.containers[]?.resources.limits["nvidia.com/gpu"] // "0" | tonumber] | add | tostring),
+       ([.spec.containers[]?.image | split("/") | last] | join(",") | .[0:60])] | @tsv')
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tPOD\tNODE\tPHASE\tREQUESTS\tLIMITS\tIMAGE\n'; printf '%s\n' "$out"; } | oa_table
+  else
+    echo "No running or pending pod requests nvidia.com/gpu."
+  fi
+}
+
+pending() {
+  oa_head "Pods waiting for GPUs"
+  local out
+  out=$(pods_json | jq -r '.items[] | select(.status.phase == "Pending")
+    | select(any(.spec.containers[]?; .resources.limits["nvidia.com/gpu"] or .resources.requests["nvidia.com/gpu"]))
+    | [.metadata.namespace, .metadata.name,
+       ([.status.conditions[]? | select(.type == "PodScheduled" and .status == "False") | .message][0] // "waiting" | .[0:140])] | @tsv')
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tPOD\tREASON\n'; printf '%s\n' "$out"; } | oa_table
+  else
+    echo "No GPU pod is pending."
+  fi
+}
+
+operators() {
+  oa_head "Operators (ClusterServiceVersions)"
+  local csv
+  if csv=$(oc_ get csv -A -o json 2>/dev/null); then
+    # Operators installed for all namespaces copy their CSV everywhere; show the original only.
+    out=$(jq -r '.items[] | select(.status.reason != "Copied")
+      | select(.metadata.name | test("gpu-operator|nfd|node-feature|network-operator|nvidia"; "i"))
+      | [.metadata.namespace, .metadata.name, (.spec.version // "-"), (.status.phase // "-")] | @tsv' <<<"$csv")
+    if [ -n "$out" ]; then
+      { printf 'NAMESPACE\tCSV\tVERSION\tPHASE\n'; printf '%s\n' "$out"; } | oa_table
+    else
+      echo "No NVIDIA GPU Operator, Node Feature Discovery or Network Operator is installed through OLM."
+    fi
+  else
+    oa_warn "Not allowed to list ClusterServiceVersions"
+  fi
+
+  oa_head "NVIDIA GPU Operator (ClusterPolicy)"
+  if oa_has_api nvidia.com; then
+    oc_ get clusterpolicies.nvidia.com -o json 2>/dev/null | jq -r '.items[] | "\(.metadata.name): state=\(.status.state // "unknown")"' \
+      || oa_warn "Not allowed to read ClusterPolicies"
+  else
+    echo "Not installed (no nvidia.com API)."
+  fi
+
+  oa_head "Node Feature Discovery"
+  if oa_has_api nfd.openshift.io; then
+    oc_ get nodefeaturediscoveries.nfd.openshift.io -A -o json 2>/dev/null | jq -r '.items[] |
+      "\(.metadata.namespace)/\(.metadata.name): \([.status.conditions[]? | select(.status == "True") | .type] | join(",") | if . == "" then "no conditions" else . end)"' \
+      || oa_warn "Not allowed to read NodeFeatureDiscovery"
+    oc_ get nodes -l feature.node.kubernetes.io/pci-10de.present=true -o name 2>/dev/null | sed 's|^node/|  NVIDIA PCI device found on: |'
+  else
+    echo "Not installed (no nfd.openshift.io API)."
+  fi
+
+  oa_head "NVIDIA Network Operator (NicClusterPolicy)"
+  if oa_has_api mellanox.com; then
+    oc_ get nicclusterpolicies.mellanox.com -o json 2>/dev/null | jq -r '.items[] | "\(.metadata.name): state=\(.status.state // "unknown")"' \
+      || oa_warn "Not allowed to read NicClusterPolicies"
+  else
+    echo "Not installed (no mellanox.com API)."
+  fi
+
+  oa_head "Operator pods that are not Running"
+  out=$(pods_json | jq -r '.items[] | select(.metadata.namespace | test("nvidia|gpu-operator|nfd|network-operator"; "i"))
+    | select(.status.phase != "Running" or any(.status.containerStatuses[]?; .ready == false))
+    | [.metadata.namespace, .metadata.name, .status.phase,
+       ([.status.containerStatuses[]?.state.waiting.reason // empty][0] // "")] | @tsv')
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tPOD\tPHASE\tREASON\n'; printf '%s\n' "$out"; } | oa_table
+  else
+    echo "None."
+  fi
+}
+
+case $what in
+  nodes) nodes ;;
+  pods) pods ;;
+  pending) pending ;;
+  operators) operators ;;
+  all) nodes; pods; pending; operators ;;
+esac

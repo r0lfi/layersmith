@@ -122,9 +122,12 @@ def validate_spec(spec):
     has_training = bool(spec.get("training"))
     has_gpu_benchmark = spec.get("gpu_benchmark") is not None and "gpu_benchmark" in spec
     has_aiml = bool(spec.get("aiml"))
-    if has_training + has_gpu_benchmark + has_aiml > 1:
-        raise InvalidSpec("Choose either an LLM training profile, the GPU benchmark template or an "
-                          "AI/ML/GPU template, not several.")
+    has_openshift = spec.get("openshift") is not None and "openshift" in spec
+    if has_training + has_gpu_benchmark + has_aiml + has_openshift > 1:
+        raise InvalidSpec("Choose either an LLM training profile, the GPU benchmark template, an "
+                          "AI/ML/GPU template or the OpenShift Admin Toolkit, not several.")
+    if has_openshift:
+        _apply_openshift(spec)
     if has_aiml:
         _apply_aiml(spec)
     if has_gpu_benchmark:
@@ -272,6 +275,39 @@ def _apply_aiml(spec):
     spec["architecture"] = "amd64"
     spec["base"] = {"source": recipe["base"]["reference"], "family": recipe["family"],
                     "display": recipe["base"]["display"]}
+
+
+def _apply_openshift(spec):
+    """The OpenShift Admin Toolkit owns its Enterprise Linux base, packages and layout.
+
+    Extra distro packages, environment variables and labels may still be
+    added; everything else comes from the profile.
+    """
+    from layersmith.openshift import recipes  # imported here: recipes imports this module
+
+    for key in ("presets", "packages", "tools", "files", "scripts", "user", "workdir"):
+        if spec.get(key):
+            raise InvalidSpec(f"The OpenShift Admin Toolkit is made from its profile; remove the custom {key}, or "
+                              "take the Containerfile over in Advanced mode.")
+    try:
+        recipe = recipes.resolve(spec["openshift"])
+    except recipes.OpenShiftError as exc:
+        raise InvalidSpec(str(exc)) from exc
+    # Stored small and explicit: versions only where the user chose one, so
+    # oc-mirror and opm keep following the client version otherwise.
+    request = {key: value for key, value in spec["openshift"].items() if value not in (None, "", {})}
+    request.update({"base": recipe["base"]["key"], "ocp_version": recipe["ocp"]["version"],
+                    "optional": recipe["optional"], "timezone": recipe["timezone"],
+                    "prod_pattern": recipe["prod_pattern"]})
+    spec["openshift"] = request
+    if spec.get("architecture") not in (None, "amd64"):
+        raise InvalidSpec("The OpenShift Admin Toolkit is built for linux/amd64.")
+    spec["architecture"] = "amd64"
+    base = recipe["base"]
+    if base["distribution"]:
+        spec["base"] = {"distribution": base["distribution"], "version": base["version"]}
+    else:
+        spec["base"] = {"source": base["reference"], "family": "rpm", "display": base["display"]}
 
 
 def _apply_gpu_benchmark(spec):

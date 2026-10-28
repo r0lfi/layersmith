@@ -155,7 +155,8 @@ class CliBackend:
         return destination.stat().st_size
 
     def run_container(self, image_ref: str, argv: list[str], on_log: LogSink, timeout: int = 1800,
-                      network: str = "none", entrypoint: str | None = None) -> tuple[int, str]:
+                      network: str = "none", entrypoint: str | None = None,
+                      user: str | None = None) -> tuple[int, str]:
         """Run a command in a built image and return (exit status, output).
 
         Used for the checks of training images: networking off by default,
@@ -165,7 +166,8 @@ class CliBackend:
         """
         args = ["run", "--rm", "--network", network, "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges", "--shm-size", "1g",
-                *(["--entrypoint", entrypoint] if entrypoint else []), image_ref, *argv]
+                *(["--entrypoint", entrypoint] if entrypoint else []), *(["--user", user] if user else []),
+                image_ref, *argv]
         # An inline script can be kilobytes long; the log shows that it was there, not all of it.
         on_log("$ " + " ".join(a if len(a) <= 200 else f"<{len(a)} characters>" for a in [self.binary, *args]))
         collected: list[str] = []

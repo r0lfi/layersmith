@@ -1,0 +1,69 @@
+#!/bin/bash
+# Compare the client versions with the cluster you are logged in to.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+oa_usage "Usage: oc-version-check
+
+Prints the oc and kubectl client versions and, when logged in, the cluster's
+OpenShift and Kubernetes versions, then checks the skew:
+  oc       same minor as the cluster is the supported combination; one minor apart works for
+           everyday use (warning); further apart fails
+  kubectl  Kubernetes skew policy: at most one minor older or newer than the API server
+Exit 0 = supported, 1 = outside the skew, 2 = not logged in (client versions only)." "$@"
+oa_need oc jq
+
+minor() { sed -E 's/^v?([0-9]+)\.([0-9]+).*/\1 \2/' <<<"$1"; }
+skew() {  # skew CLIENT SERVER -> absolute minor difference, or 99 for different majors
+  local cmaj cmin smaj smin
+  read -r cmaj cmin <<<"$(minor "$1")"
+  read -r smaj smin <<<"$(minor "$2")"
+  if [ "$cmaj" != "$smaj" ]; then echo 99; return; fi
+  local d=$((cmin - smin))
+  echo "${d#-}"
+}
+
+client=$(oc version --client -o json 2>/dev/null)
+oc_client=$(jq -r '.releaseClientVersion // .clientVersion.gitVersion' <<<"$client")
+kubectl_client=$(kubectl version --client -o json 2>/dev/null | jq -r '.clientVersion.gitVersion')
+echo "oc client:       $oc_client"
+echo "kubectl client:  $kubectl_client"
+[ -r "$OA_SHARE/versions.json" ] && echo "(all tools: openshift-admin-versions)"
+
+if [ -z "$(oa_context)" ]; then
+  echo "Not logged in: no server to compare against." >&2
+  exit 2
+fi
+server=$(oc_ version -o json 2>&1) || {
+  echo "Cannot read the server version from '$(oa_context)': ${server##*: }" >&2
+  exit 2
+}
+ocp=$(jq -r '.openshiftVersion // empty' <<<"$server")
+kube=$(jq -r '.serverVersion.gitVersion // empty' <<<"$server")
+echo "Cluster:         $(oa_context) ($(oa_server))"
+echo "OpenShift:       ${ocp:-not OpenShift (or not allowed to read it)}"
+echo "Kubernetes:      ${kube:-unknown}"
+
+status=0
+if [ -n "$ocp" ]; then
+  d=$(skew "$oc_client" "$ocp")
+  if [ "$d" -eq 0 ]; then
+    oa_ok "oc $oc_client matches OpenShift $ocp"
+  elif [ "$d" -eq 1 ]; then
+    oa_warn "oc $oc_client is one minor away from OpenShift $ocp: fine for everyday use; build an image with the matching client for upgrades and support cases"
+  else
+    printf '%s\n' "${OA_RED}oc $oc_client is $d minors away from OpenShift $ocp: use a matching client${OA_OFF}"
+    status=1
+  fi
+fi
+if [ -n "$kube" ]; then
+  d=$(skew "$kubectl_client" "$kube")
+  if [ "$d" -le 1 ]; then
+    oa_ok "kubectl $kubectl_client is within the Kubernetes skew policy for $kube"
+  else
+    printf '%s\n' "${OA_RED}kubectl $kubectl_client is outside the skew policy for $kube (one minor at most)${OA_OFF}"
+    status=1
+  fi
+fi
+exit "$status"

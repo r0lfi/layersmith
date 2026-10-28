@@ -1,0 +1,86 @@
+#!/bin/bash
+# Cluster overview: session, version, nodes, cluster operators and pods that are not running.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+oa_usage "Usage: oc-status
+Who you are, the cluster version, node readiness, cluster operators with problems
+and pods that are neither Running nor Completed." "$@"
+
+oa_need oc jq
+oa_require_login
+oa_prod_banner
+
+oa_head "Session"
+printf 'Context:    %s\nAPI server: %s\nUser:       %s\nNamespace:  %s\n' \
+  "$OA_CONTEXT" "$(oa_server)" "$OA_USER" "$(oa_namespace)"
+
+oa_head "Cluster version"
+if oa_has_api config.openshift.io; then
+  if ! oc_ get clusterversion version -o json 2>/dev/null | jq -r '
+      "OpenShift:  \(.status.desired.version // "unknown")  (channel \(.spec.channel // "none"))",
+      (.status.conditions[]? | select(.type == "Progressing" or .type == "Failing" or .type == "Available")
+        | "  \(.type)=\(.status)  \(.message // "" | .[0:150])")'; then
+    echo "Not allowed to read the ClusterVersion."
+  fi
+else
+  echo "No config.openshift.io API: this is not an OpenShift cluster."
+fi
+oc_ version 2>/dev/null | grep -i '^Kubernetes Version' || true
+
+problems=0
+oa_head "Nodes"
+if nodes=$(oc_ get nodes -o json 2>/dev/null); then
+  jq -r '
+    .items[] | [
+      .metadata.name,
+      ([.metadata.labels | keys[] | select(startswith("node-role.kubernetes.io/")) | sub("node-role.kubernetes.io/"; "")] | join(",") | if . == "" then "-" else . end),
+      (.status.conditions[] | select(.type == "Ready") | if .status == "True" then "Ready" else "NotReady" end),
+      (if .spec.unschedulable then "SchedulingDisabled" else "" end),
+      .status.nodeInfo.kubeletVersion
+    ] | @tsv' <<<"$nodes" | sort -k2 | (printf 'NAME\tROLES\tSTATUS\tSCHEDULING\tKUBELET\n'; cat) | oa_table
+  notready=$(jq '[.items[] | select(any(.status.conditions[]; .type == "Ready" and .status != "True"))] | length' <<<"$nodes")
+  total=$(jq '.items | length' <<<"$nodes")
+  echo "$((total - notready))/$total nodes Ready"
+  [ "$notready" -eq 0 ] || problems=1
+else
+  echo "Not allowed to list nodes."
+fi
+
+if oa_has_api config.openshift.io; then
+  oa_head "Cluster operators with problems"
+  if co=$(oc_ get clusteroperators -o json 2>/dev/null); then
+    bad=$(jq -r '.items[] | . as $co
+      | ([.status.conditions[]? | {(.type): .status}] | add // {}) as $c
+      | select($c.Available != "True" or $c.Degraded == "True")
+      | [$co.metadata.name, "Available=\($c.Available // "?")", "Degraded=\($c.Degraded // "?")",
+         ([.status.conditions[]? | select(.type == "Degraded" and .status == "True") | .message][0] // "" | .[0:120])]
+      | @tsv' <<<"$co")
+    if [ -n "$bad" ]; then
+      printf '%s\n' "$bad" | oa_table
+      problems=1
+    else
+      oa_ok "All $(jq '.items | length' <<<"$co") cluster operators are Available and not Degraded"
+    fi
+  else
+    echo "Not allowed to read cluster operators."
+  fi
+fi
+
+oa_head "Pods that are not Running or Completed"
+mapfile -t scope < <(oa_scope_args "" 0 pods)
+if pods=$(oc_ get pods "${scope[@]}" -o json 2>/dev/null); then
+  out=$(jq -r '.items[] | select(.status.phase != "Running" and .status.phase != "Succeeded")
+    | [.metadata.namespace, .metadata.name, .status.phase,
+       ([.status.containerStatuses[]?.state.waiting.reason // empty][0] // .status.reason // "")] | @tsv' <<<"$pods" | head -n 40)
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tPOD\tPHASE\tREASON\n'; printf '%s\n' "$out"; } | oa_table
+    problems=1
+  else
+    oa_ok "None (${scope[*]})"
+  fi
+else
+  echo "Not allowed to list pods (${scope[*]})."
+fi
+exit "$problems"

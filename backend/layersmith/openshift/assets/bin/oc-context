@@ -1,0 +1,82 @@
+#!/bin/bash
+# List, show and switch Kubernetes contexts across every loaded kubeconfig file.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-context                 list contexts (* = current, PROD = matches the production pattern)
+       oc-context NAME            switch context (a unique part of the name is enough)
+       oc-context -n NAMESPACE    set the namespace of the current context
+       oc-context --current       print the current context
+       oc-context --files         show which kubeconfig files are loaded
+
+Kubeconfigs: \$KUBECONFIG, else ~/.kube/config plus every file in ~/.kube/clusters/
+(*.yaml, *.yml, *.kubeconfig), loaded by the toolkit's shell profile.
+Production pattern: '$OA_PROD_PATTERN' (OPENSHIFT_ADMIN_PROD_PATTERN), matched against
+the context name and the API server URL."
+oa_usage "$usage" "$@"
+oa_need oc jq
+
+# Redacted view: no tokens, keys or certificate data (never --raw).
+config() { oc config view -o json 2>/dev/null || echo '{}'; }
+
+list() {
+  local data current rows
+  data=$(config)
+  current=$(oa_context)
+  rows=$(jq -r '. as $c | .contexts[]? | . as $x
+    | [$x.name, $x.context.cluster,
+       ([$c.clusters[]? | select(.name == $x.context.cluster) | .cluster.server][0] // "-"),
+       ($x.context.namespace // "default"), $x.context.user] | @tsv' <<<"$data")
+  if [ -z "$rows" ]; then
+    echo "No contexts. Log in with 'oc login https://api.<cluster>:6443', or put kubeconfig files in ~/.kube/clusters/."
+    return 2
+  fi
+  {
+    printf ' \tCONTEXT\tAPI SERVER\tNAMESPACE\tFLAG\n'
+    while IFS=$'\t' read -r name _cluster server ns _user; do
+      local mark=' ' flag=''
+      [ "$name" = "$current" ] && mark='*'
+      oa_is_prod "$name" "$server" && flag=PROD
+      printf '%s\t%s\t%s\t%s\t%s\n' "$mark" "$name" "$server" "$ns" "$flag"
+    done <<<"$rows"
+  } | oa_table
+}
+
+switch() {
+  local want=$1 names match
+  names=$(config | jq -r '.contexts[]?.name')
+  if grep -qxF -- "$want" <<<"$names"; then
+    match=$want
+  else
+    match=$(grep -F -- "$want" <<<"$names" || true)
+    if [ -z "$match" ]; then
+      oa_die 64 "No context matches '$want'. Contexts: $(tr '\n' ' ' <<<"$names")"
+    elif [ "$(wc -l <<<"$match")" -gt 1 ]; then
+      oa_die 64 "'$want' matches several contexts:"$'\n'"$match"
+    fi
+  fi
+  oc config use-context "$match" >/dev/null || exit 1
+  echo "Switched to context '$match' ($(oa_server))"
+  if oa_is_prod; then
+    printf '%s\n' "${OA_PROD} PRODUCTION ${OA_OFF} '$match' matches the production pattern '$OA_PROD_PATTERN'. Take care." >&2
+  fi
+}
+
+case "${1:-}" in
+  "") list ;;
+  --current) oa_context || exit 2 ;;
+  --files)
+    IFS=: read -r -a files <<<"${KUBECONFIG:-$HOME/.kube/config}"
+    for f in "${files[@]}"; do
+      if [ -e "$f" ]; then echo "$f"; else echo "$f (does not exist yet)"; fi
+    done
+    ;;
+  -n | --namespace)
+    [ -n "${2:-}" ] || oa_die 64 "oc-context -n NAMESPACE"
+    [ -n "$(oa_context)" ] || oa_die 2 "No current context"
+    oc config set-context --current --namespace="$2" >/dev/null && echo "Namespace of '$(oa_context)' is now $2"
+    ;;
+  -*) oa_die 64 "$usage" ;;
+  *) switch "$1" ;;
+esac

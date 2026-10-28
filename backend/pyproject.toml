@@ -25,6 +25,7 @@ include = ["layersmith*"]
 [tool.setuptools.package-data]
 "layersmith.training" = ["stacks/*/*", "assets/**/*"]
 "layersmith.aiml" = ["assets/*", "packages/*.json"]
+"layersmith.openshift" = ["assets/**/*"]
 "layersmith.gpu_benchmark" = ["runtime/*.py", "runtime/**/*.py", "runtime/tui/*.tcss", "runtime/bin/*", "runtime/scripts/*"]
 
 [tool.pytest.ini_options]

@@ -1,0 +1,107 @@
+#!/bin/bash
+# OpenShift AI (Red Hat OpenShift AI / Open Data Hub) and model serving status.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-ai [platform|serving|vllm|all] [-n NAMESPACE]   (default: all, every namespace you may read)
+
+  platform  OpenShift AI operator, DSCInitialization and DataScienceCluster components
+  serving   KServe InferenceServices (ready, URL, runtime), ServingRuntimes and their Routes
+  vllm      pods running a vLLM image: node, GPUs, restarts"
+oa_usage "$usage" "$@"
+oa_need oc jq
+
+what=all ns=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    platform | serving | vllm | all) what=$1 ;;
+    -n | --namespace) ns=${2:-}; shift ;;
+    *) oa_die 64 "$usage" ;;
+  esac
+  shift
+done
+
+oa_require_login
+oa_prod_banner
+
+platform() {
+  oa_head "OpenShift AI operator"
+  local out
+  out=$(oc_ get csv -A -o json 2>/dev/null | jq -r '.items[] | select(.status.reason != "Copied")
+    | select(.metadata.name | test("rhods-operator|opendatahub-operator|serverless-operator|servicemeshoperator|authorino"; "i"))
+    | [.metadata.namespace, .metadata.name, .spec.version, .status.phase] | @tsv')
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tCSV\tVERSION\tPHASE\n'; printf '%s\n' "$out"; } | oa_table
+  else
+    echo "OpenShift AI (rhods-operator) is not installed, or you may not list operators."
+  fi
+
+  oa_head "DSCInitialization / DataScienceCluster"
+  if oa_has_api dscinitialization.opendatahub.io; then
+    oc_ get dscinitializations -o json 2>/dev/null | jq -r '.items[] |
+      "DSCInitialization \(.metadata.name): phase=\(.status.phase // "unknown"), applications namespace=\(.spec.applicationsNamespace // "-")"'
+  fi
+  if oa_has_api datasciencecluster.opendatahub.io; then
+    oc_ get datascienceclusters -o json 2>/dev/null | jq -r '.items[] |
+      "DataScienceCluster \(.metadata.name): phase=\(.status.phase // "unknown")",
+      (.spec.components // {} | to_entries[] | "  \(.key): \(.value.managementState // "-")")'
+  else
+    echo "No DataScienceCluster API: OpenShift AI is not installed."
+  fi
+}
+
+serving() {
+  oa_head "InferenceServices (KServe)"
+  if ! oa_has_api serving.kserve.io; then
+    echo "No serving.kserve.io API: single-model serving (KServe) is not installed."
+    return
+  fi
+  local scope
+  mapfile -t scope < <(oa_scope_args "$ns" 0 inferenceservices.serving.kserve.io)
+  oc_ get inferenceservices.serving.kserve.io "${scope[@]}" -o json 2>/dev/null | jq -r '
+    .items[] | [.metadata.namespace, .metadata.name,
+      ([.status.conditions[]? | select(.type == "Ready") | .status][0] // "Unknown"),
+      (.spec.predictor.model.runtime // "-"), (.spec.predictor.model.modelFormat.name // "-"),
+      (.status.url // "-")] | @tsv' | (printf 'NAMESPACE\tNAME\tREADY\tRUNTIME\tFORMAT\tURL\n'; cat) | oa_table
+
+  oa_head "ServingRuntimes"
+  oc_ get servingruntimes.serving.kserve.io "${scope[@]}" -o json 2>/dev/null | jq -r '
+    .items[] | [.metadata.namespace, .metadata.name,
+      ([.spec.containers[]?.image | split("/") | last] | join(",") | .[0:70]),
+      ([.spec.supportedModelFormats[]?.name] | join(","))] | @tsv' | (printf 'NAMESPACE\tRUNTIME\tIMAGE\tFORMATS\n'; cat) | oa_table
+
+  oa_head "Routes of model-serving namespaces"
+  local namespaces
+  namespaces=$(oc_ get inferenceservices.serving.kserve.io "${scope[@]}" -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u)
+  if [ -z "$namespaces" ]; then
+    echo "No InferenceServices."
+    return
+  fi
+  while read -r n; do
+    oc_ get routes -n "$n" -o json 2>/dev/null | jq -r '.items[] |
+      [.metadata.namespace, .metadata.name, .spec.host, (.spec.tls.termination // "none (plain HTTP)")] | @tsv'
+  done <<<"$namespaces" | (printf 'NAMESPACE\tROUTE\tHOST\tTLS\n'; cat) | oa_table
+}
+
+vllm() {
+  oa_head "vLLM pods"
+  local scope out
+  mapfile -t scope < <(oa_scope_args "$ns" 0 pods)
+  out=$(oc_ get pods "${scope[@]}" -o json 2>/dev/null | jq -r '.items[] | select(any(.spec.containers[]?; .image | test("vllm"; "i")))
+    | [.metadata.namespace, .metadata.name, .status.phase, (.spec.nodeName // "-"),
+       ([.spec.containers[]?.resources.limits["nvidia.com/gpu"] // "0" | tonumber] | add | tostring),
+       ([.status.containerStatuses[]?.restartCount] | add // 0 | tostring)] | @tsv')
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tPOD\tPHASE\tNODE\tGPUS\tRESTARTS\n'; printf '%s\n' "$out"; } | oa_table
+  else
+    echo "No pod runs a vLLM image (${scope[*]})."
+  fi
+}
+
+case $what in
+  platform) platform ;;
+  serving) serving ;;
+  vllm) vllm ;;
+  all) platform; serving; vllm ;;
+esac

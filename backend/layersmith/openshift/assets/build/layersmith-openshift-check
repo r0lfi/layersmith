@@ -1,0 +1,207 @@
+#!/bin/bash
+# Post-build checks of an OpenShift Admin Toolkit image. LayerSmith runs them
+# with networking disabled and every capability dropped:
+#
+#   image  as root: no kubeconfig, registry credentials or SSH keys in the image,
+#          no SSH server, Distrobox prerequisites, sudo, locale and time zone
+#   user   as an unprivileged uid with no passwd entry (like a fresh Distrobox
+#          user): every tool and its version, bash completion, the helpers
+#          without a cluster, several kubeconfigs and the production warning
+#
+# The last line is the result: LAYERSMITH_CHECK_RESULT {json}.
+set -uo pipefail
+
+mode=${1:-}
+case $mode in image | user) ;; *) echo "usage: layersmith-openshift-check image|user" >&2; exit 64 ;; esac
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+export HOME=$work/home
+mkdir -p "$HOME"
+unset KUBECONFIG
+steps="$work/steps.jsonl"
+: >"$steps"
+
+step() {  # step NAME passed|failed|warning DETAIL
+  jq -cn --arg name "$1" --arg status "$2" --arg detail "${3:0:600}" '{name: $name, status: $status, detail: $detail}' >>"$steps"
+  printf '%-8s %s: %s\n' "$2" "$1" "${3:0:300}"
+}
+
+info='{}'
+
+check_image() {
+  # Kubeconfig-shaped files anywhere on the image's own filesystem.
+  local found
+  found=$(find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path "$work" \) -prune -o -type f -size -2M \
+      \( -path '*/.kube/*' -o -iname '*kubeconfig*' -o -name '*.yaml' -o -name '*.yml' -o -name config \) -print0 2>/dev/null \
+    | xargs -0 -r grep -lZE '^kind: *"?Config"?[[:space:]]*$' 2>/dev/null \
+    | xargs -0 -r grep -lE '^(clusters|users|contexts):' 2>/dev/null | head -n 20)
+  if [ -n "$found" ]; then
+    step "no kubeconfig in the image" failed "kubeconfig files: $(tr '\n' ' ' <<<"$found")"
+  else
+    step "no kubeconfig in the image" passed "no file with kind: Config and clusters/users/contexts"
+  fi
+
+  found=''
+  for f in /root/.docker/config.json /root/.config/containers/auth.json /etc/containers/auth.json \
+           /run/containers/0/auth.json /root/.ssh /home/*/.ssh /root/.kube /home/*/.kube /root/.netrc; do
+    [ -e "$f" ] && found+="$f "
+  done
+  if [ -n "$found" ]; then
+    step "no stored credentials" failed "present: $found"
+  else
+    step "no stored credentials" passed "no registry auth, .netrc, .ssh or .kube for root or any user"
+  fi
+
+  if command -v sshd >/dev/null 2>&1 || rpm -q openssh-server >/dev/null 2>&1; then
+    step "no SSH server" failed "openssh-server is installed"
+  else
+    step "no SSH server" passed "openssh-server not installed (ssh client only)"
+  fi
+
+  local missing='' dep
+  # distrobox-init's dependency list (1.8): with all of them present, the first
+  # `distrobox enter` installs nothing and needs no network.
+  for dep in bc bzip2 chpasswd curl diff find findmnt gpg hostname less lsof man mount passwd pigz pinentry ping \
+             ps rsync script ssh sudo time tree umount unzip useradd wc wget xauth zip bash; do
+    command -v "$dep" >/dev/null 2>&1 || missing+="$dep "
+  done
+  if [ -n "$missing" ]; then
+    step "distrobox prerequisites" failed "missing: $missing"
+  else
+    step "distrobox prerequisites" passed "every command distrobox-init needs is present"
+  fi
+
+  if [ -r /etc/sudoers ] && visudo -c >/dev/null 2>&1; then
+    step "sudo" passed "$(rpm -q sudo); sudoers valid"
+  else
+    step "sudo" failed "sudo missing or /etc/sudoers invalid"
+  fi
+
+  local tz
+  tz=$(readlink /etc/localtime)
+  if [ "${tz#*/zoneinfo/}" = "$(cat /etc/timezone 2>/dev/null)" ] && locale -a 2>/dev/null | grep -qix en_us.utf8; then
+    step "locale and time zone" passed "time zone ${tz#*/zoneinfo/} ($(date +%Z)), LANG=${LANG:-unset}, en_US.UTF-8 available"
+  else
+    step "locale and time zone" failed "localtime -> $tz, LANG=${LANG:-unset}"
+  fi
+
+  if [ -s /usr/local/share/openshift-admin/versions.json ]; then
+    step "version inventory" passed "/usr/local/share/openshift-admin/versions.json written at build time"
+  else
+    step "version inventory" failed "versions.json missing"
+  fi
+  info=$(jq -cn --arg os "$(. /etc/os-release && echo "$PRETTY_NAME")" '{os: $os, uid: 0}')
+}
+
+check_user() {
+  local uid
+  uid=$(id -u)
+  if [ "$uid" -ne 0 ]; then
+    step "runs as non-root" passed "uid $uid, gid $(id -g), no passwd entry needed"
+  else
+    step "runs as non-root" failed "running as root; the user check must run unprivileged"
+  fi
+
+  local versions
+  versions=$(openshift-admin-versions --json 2>/dev/null)
+  if [ -z "$versions" ]; then
+    step "tools" failed "openshift-admin-versions produced no output"
+    versions='[]'
+  else
+    local bad
+    bad=$(jq -r '[.[] | select(.status != "ok") | "\(.binary): \(.status) (\(.version); expected \(.expected))"] | join("; ")' <<<"$versions")
+    if [ -n "$bad" ]; then
+      step "tools" failed "$bad"
+    else
+      step "tools" passed "$(jq -r 'length' <<<"$versions") tools run as a normal user and report the pinned versions"
+    fi
+  fi
+
+  local completed='' missing='' tool
+  for tool in oc kubectl helm kustomize k9s stern opm operator-sdk yq oc-context oc-gpu; do
+    command -v "$tool" >/dev/null 2>&1 || continue
+    if bash -c 'source /usr/share/bash-completion/bash_completion 2>/dev/null
+        { _comp_load "$1" || __load_completion "$1" || _completion_loader "$1"; } >/dev/null 2>&1
+        complete -p "$1"' _ "$tool" >/dev/null 2>&1; then
+      completed+="$tool "
+    else
+      missing+="$tool "
+    fi
+  done
+  if [ -n "$missing" ]; then
+    step "bash completion" failed "no completion for: $missing"
+  else
+    step "bash completion" passed "loads for: $completed"
+  fi
+
+  # No kubeconfig at all: every helper must say so and exit 2, not crash or hang.
+  local out code cmd bad=''
+  for cmd in oc-status oc-health oc-gpu oc-ai oc-storage oc-routes oc-version-check; do
+    out=$(timeout 60 "$cmd" 2>&1)
+    code=$?
+    if [ "$code" -ne 2 ]; then
+      bad+="$cmd exit $code: ${out:0:120}; "
+    fi
+  done
+  if [ -n "$bad" ]; then
+    step "helpers without a cluster" failed "$bad"
+  else
+    step "helpers without a cluster" passed "oc-status, oc-health, oc-gpu, oc-ai, oc-storage, oc-routes and oc-version-check explain that nobody is logged in (exit 2)"
+  fi
+
+  # Three clusters in ~/.kube/clusters, no credentials, unreachable servers.
+  mkdir -p "$HOME/.kube/clusters"
+  local name
+  for name in openshift-lab openshift-ai-test openshift-ai-prod; do
+    cat >"$HOME/.kube/clusters/$name.yaml" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- name: $name
+  cluster:
+    server: https://127.0.0.1:1
+contexts:
+- name: $name
+  context:
+    cluster: $name
+    user: $name-user
+    namespace: default
+users:
+- name: $name-user
+  user: {}
+EOF
+  done
+  out=$(bash -lc 'echo "KUBECONFIG=$KUBECONFIG"; oc-context; oc-context ai-prod 2>&1; oc-context --current; oc-status; echo "status-exit=$?"' 2>&1)
+  local contexts
+  contexts=$(grep -c 'openshift-' <<<"$(grep -E '^[ *] ' <<<"$out")")
+  if grep -q "clusters/openshift-ai-prod.yaml" <<<"$out" && [ "$contexts" -ge 3 ] \
+      && grep -qE 'openshift-ai-prod.*PROD' <<<"$out" && grep -q 'PRODUCTION' <<<"$out" \
+      && grep -qx 'openshift-ai-prod' <<<"$out" && grep -q 'status-exit=3' <<<"$out" \
+      && grep -q '^current-context: openshift-ai-prod' "$HOME/.kube/config" \
+      && ! grep -q '^current-context' "$HOME"/.kube/clusters/*.yaml; then
+    step "several kubeconfigs" passed "3 files in ~/.kube/clusters merged into KUBECONFIG; oc-context lists and switches (written to ~/.kube/config, cluster files untouched); production warned; unreachable cluster reported (exit 3)"
+  else
+    step "several kubeconfigs" failed "${out//$'\n'/ | }"
+  fi
+
+  # A login shell, as `distrobox enter` starts one.
+  out=$(bash -lic '__oa_prompt; printf "%s" "$PS1"' 2>/dev/null)
+  if grep -q 'PROD' <<<"$out" && grep -q 'openshift-ai-prod' <<<"$out"; then
+    step "prompt" passed "shows the context and marks production"
+  else
+    step "prompt" failed "PS1: ${out:0:200}"
+  fi
+  info=$(jq -cn --argjson tools "$versions" --arg uid "$uid" '{tools: $tools, uid: ($uid | tonumber)}')
+}
+
+"check_$mode"
+
+status=passed
+grep -q '"status":"failed"' "$steps" && status=failed
+result=$(jq -cn --arg check "$mode" --arg status "$status" --arg image "${LAYERSMITH_IMAGE:-}" \
+  --slurpfile steps "$steps" --argjson info "$info" \
+  '{check: $check, status: $status, image: $image, steps: $steps, info: $info}')
+echo "LAYERSMITH_CHECK_RESULT $result"
+[ "$status" = passed ]

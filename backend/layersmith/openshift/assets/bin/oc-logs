@@ -1,0 +1,103 @@
+#!/bin/bash
+# Simplified log analysis: logs of a pod, deployment or selector; error summaries; failing pods.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-logs [-n NS] [--since 1h] [--tail N] [--errors] [-f] TARGET
+       oc-logs [-n NS | -A] --problems
+
+TARGET is a pod, KIND/NAME (deploy/x, sts/x, job/x) or -l SELECTOR.
+
+  --errors    only lines matching error|fail|fatal|panic|exception|refused|denied|oom,
+              followed by the 15 most frequent of them (numbers and ids folded together)
+  -f          follow (uses stern for selectors when installed)
+  --problems  pods that restart or wait (CrashLoopBackOff, ImagePullBackOff, ...) with the
+              last termination reason and the tail of the previous container's log"
+oa_usage "$usage" "$@"
+oa_need oc jq
+
+ns='' since='' tail=200 errors=0 follow=0 problems=0 all=0 selector='' target=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n | --namespace) ns=${2:-}; shift ;;
+    -A | --all-namespaces) all=1 ;;
+    --since) since=${2:-}; shift ;;
+    --tail) tail=${2:-}; shift ;;
+    --errors) errors=1 ;;
+    -f | --follow) follow=1 ;;
+    --problems) problems=1 ;;
+    -l | --selector) selector=${2:-}; shift ;;
+    -*) oa_die 64 "$usage" ;;
+    *) target=$1 ;;
+  esac
+  shift
+done
+[[ $tail =~ ^[0-9]+$ ]] || oa_die 64 "--tail takes a number"
+
+oa_require_login
+
+ERRORS='error|fail|fatal|panic|exception|refused|denied|oomkilled|out of memory|timed out|traceback'
+
+if [ "$problems" = 1 ]; then
+  mapfile -t scope < <(oa_scope_args "$ns" "$all" pods)
+  oa_head "Pods with problems (${scope[*]})"
+  data=$(oc_ get pods "${scope[@]}" -o json 2>/dev/null) || oa_die 4 "Not allowed to list pods (${scope[*]})"
+  rows=$(jq -r '.items[] | . as $p | .status.containerStatuses[]?
+    | select(.restartCount > 0 or .state.waiting.reason != null or .state.terminated.reason == "Error")
+    | [$p.metadata.namespace, $p.metadata.name, .name, (.restartCount | tostring),
+       (.state.waiting.reason // .state.terminated.reason // "running"),
+       (.lastState.terminated.reason // "-"), (.lastState.terminated.exitCode // "-" | tostring)] | @tsv' <<<"$data")
+  if [ -z "$rows" ]; then
+    oa_ok "No container restarts or waits."
+    exit 0
+  fi
+  { printf 'NAMESPACE\tPOD\tCONTAINER\tRESTARTS\tSTATE\tLAST TERMINATION\tEXIT\n'; printf '%s\n' "$rows"; } | oa_table
+  while IFS=$'\t' read -r pns pod container restarts _state _last _code; do
+    [ "$restarts" -gt 0 ] || continue
+    oa_head "$pns/$pod [$container] previous log (last 15 lines)"
+    oc_ logs -n "$pns" "$pod" -c "$container" --previous --tail=15 2>&1 | sed 's/^/  /'
+  done < <(head -n 10 <<<"$rows")
+  exit 1
+fi
+
+[ -n "$target$selector" ] || oa_die 64 "$usage"
+args=()
+[ -n "$ns" ] && args+=(-n "$ns")
+[ -n "$since" ] && args+=(--since="$since")
+
+if [ "$follow" = 1 ]; then
+  if [ -n "$selector" ] && command -v stern >/dev/null 2>&1; then
+    stern_args=()
+    [ -n "$ns" ] && stern_args+=(-n "$ns")
+    [ -n "$since" ] && stern_args+=(--since "$since")
+    [ "$errors" = 1 ] && stern_args+=(--include "(?i)($ERRORS)")
+    exec stern "${stern_args[@]}" -l "$selector"
+  fi
+  if [ -n "$selector" ]; then set -- -l "$selector"; else set -- "$target"; fi
+  if [ "$errors" = 1 ]; then
+    oc logs -f "${args[@]}" --all-containers --prefix "$@" | grep --line-buffered -Ei "$ERRORS"
+    exit
+  fi
+  exec oc logs -f "${args[@]}" --all-containers --prefix "$@"
+fi
+
+if [ -n "$selector" ]; then set -- -l "$selector" --max-log-requests=20; else set -- "$target"; fi
+output=$(oc_ logs "${args[@]}" --all-containers --prefix --tail="$tail" "$@" 2>&1)
+status=$?
+if [ "$errors" = 0 ]; then
+  printf '%s\n' "$output"
+  exit "$status"
+fi
+
+matches=$(grep -Ei "$ERRORS" <<<"$output" || true)
+if [ -z "$matches" ]; then
+  oa_ok "No error-like lines in the last $tail lines${since:+ (since $since)}."
+  exit "$status"
+fi
+printf '%s\n' "$matches"
+oa_head "Most frequent ($(wc -l <<<"$matches") matching lines)"
+# Fold timestamps, numbers, hex ids and UUIDs so repeats of one message count together.
+sed -E 's/^\[[^]]*\] //; s/[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:.,]+Z?//g; s/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/<uuid>/g;
+        s/0x[0-9a-fA-F]+/<hex>/g; s/[0-9]+/N/g' <<<"$matches" | cut -c1-160 | sort | uniq -c | sort -rn | head -n 15
+exit 1

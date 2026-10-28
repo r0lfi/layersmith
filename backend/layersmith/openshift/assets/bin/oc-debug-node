@@ -1,0 +1,54 @@
+#!/bin/bash
+# Debug shell (or one command) on a node through `oc debug node/...`.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-debug-node [-y] [--image IMAGE] NODE [-- COMMAND...]
+
+Starts a debug pod on NODE. Without COMMAND you get a shell: run 'chroot /host'
+to use the node's own tools. With COMMAND it runs 'chroot /host COMMAND'.
+On a production context it asks first; -y skips the question.
+--image chooses the debug image (for disconnected clusters: a mirrored support-tools image).
+Needs cluster-admin-like rights: the debug pod is privileged and sees the node's filesystem."
+oa_usage "$usage" "$@"
+oa_need oc jq
+
+yes=0 image='' node=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    -y | --yes) yes=1 ;;
+    --image) image=${2:-}; shift ;;
+    --) shift; break ;;
+    -*) oa_die 64 "$usage" ;;
+    *)
+      [ -z "$node" ] || oa_die 64 "$usage"
+      node=$1 ;;
+  esac
+  shift
+done
+[ -n "$node" ] || oa_die 64 "$usage"
+node=${node#node/}
+
+oa_require_login
+if ! oc_ get node "$node" -o name >/dev/null 2>&1; then
+  if oa_can get nodes; then
+    oa_die 64 "No node named '$node'. Nodes: $(oc_ get nodes -o name 2>/dev/null | sed 's|node/||' | tr '\n' ' ')"
+  fi
+  oa_die 4 "You may not read nodes on '$OA_CONTEXT'; debugging a node needs cluster-admin-like rights."
+fi
+
+if oa_is_prod; then
+  oa_prod_banner
+  if [ "$yes" != 1 ] && ! oa_confirm "Start a privileged debug pod on $node in PRODUCTION?"; then
+    oa_die 1 "Cancelled. (Non-interactive use on production needs -y.)"
+  fi
+fi
+
+args=(debug "node/$node")
+[ -n "$image" ] && args+=(--image="$image")
+if [ $# -gt 0 ]; then
+  exec oc "${args[@]}" -- chroot /host "$@"
+fi
+echo "Starting a debug pod on $node. Run 'chroot /host' to use the node's tools; 'exit' removes the pod." >&2
+exec oc "${args[@]}"

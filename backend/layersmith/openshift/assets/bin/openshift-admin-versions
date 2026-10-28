@@ -1,0 +1,59 @@
+#!/bin/bash
+# Installed tools and versions, checked against what this image was built to contain.
+set -uo pipefail
+
+MANIFEST=${OPENSHIFT_ADMIN_CHECKS:-/usr/local/share/openshift-admin/checks.tsv}
+
+case "${1:-}" in
+  -h | --help)
+    echo "Usage: openshift-admin-versions [--json]"
+    echo "Runs every tool's version command and compares it with the version this image was built with."
+    echo "Status: ok, missing (not installed), mismatch (runs, other version), error (version command failed)."
+    exit 0 ;;
+  --json | "") ;;
+  *) echo "Usage: openshift-admin-versions [--json]" >&2; exit 64 ;;
+esac
+[ -r "$MANIFEST" ] || { echo "$MANIFEST is missing: this is not an OpenShift Admin Toolkit image" >&2; exit 1; }
+
+# Version commands may write config or cache files (k9s, oc-mirror); keep them out of the user's home.
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+
+rows=()
+failed=0
+while IFS=$'\t' read -r -a fields; do
+  [ "${#fields[@]}" -ge 4 ] || continue
+  tool=${fields[0]} binary=${fields[1]} expect=${fields[2]}
+  argv=("${fields[@]:3}")
+  if ! path=$(command -v "$binary" 2>/dev/null); then
+    rows+=("$tool"$'\t'"$binary"$'\t'"-"$'\t'"missing"$'\t'"$expect"$'\t'"-")
+    failed=1
+    continue
+  fi
+  out=$(cd "$scratch" && HOME=$scratch XDG_CONFIG_HOME=$scratch XDG_CACHE_HOME=$scratch timeout 30 "${argv[@]}" 2>&1)
+  code=$?
+  line=$(grep -F -m1 -- "$expect" <<<"$out" || true)
+  if [ "$code" -ne 0 ]; then
+    status=error line=$(head -n1 <<<"$out")
+  elif [ -z "$line" ]; then
+    status=mismatch line=$(head -n1 <<<"$out")
+  else
+    status=ok
+  fi
+  [ "$status" = ok ] || failed=1
+  # The version itself: opm's commit, else the first version-like token, else the cleaned line.
+  case $line in
+    *OpmVersion:*) version=$(sed -E 's/.*OpmVersion:"?([^", }]+).*/commit \1/' <<<"$line") ;;
+    *) version=$(grep -oE '[vV]?[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.+-]+)?' <<<"$line" | head -n1) ;;
+  esac
+  [ -n "$version" ] || version=$(sed -E 's/[",]//g; s/[[:space:]]+/ /g; s/^ //' <<<"$line" | cut -c1-120)
+  rows+=("$tool"$'\t'"$binary"$'\t'"${version:--}"$'\t'"$status"$'\t'"$expect"$'\t'"$path")
+done <"$MANIFEST"
+
+if [ "${1:-}" = --json ]; then
+  printf '%s\n' "${rows[@]}" | jq -R -s 'split("\n") | map(select(length > 0) | split("\t")
+    | {tool: .[0], binary: .[1], version: .[2], status: .[3], expected: .[4], path: .[5]})'
+else
+  { printf 'TOOL\tBINARY\tVERSION\tSTATUS\n'; printf '%s\n' "${rows[@]}" | cut -f1-4; } | column -t -s $'\t'
+fi
+exit "$failed"

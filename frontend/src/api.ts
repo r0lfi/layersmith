@@ -43,6 +43,8 @@ export interface Build {
   gpu_benchmark?: GpuBenchmarkDetail | null;
   aiml_template?: string | null;
   aiml?: AimlDetail | null;
+  openshift_ocp?: string | null;
+  openshift?: OpenShiftDetail | null;
 }
 
 /** Split download of an image archive: parts are byte ranges of the export. */
@@ -680,6 +682,137 @@ export interface AimlDetail {
   target: Record<string, string | string[]>;
 }
 
+export interface OpenShiftTool {
+  label: string;
+  purpose: string;
+  group: string;
+  required?: boolean;
+  follows_ocp?: boolean;
+  verify: string;
+  default_version?: string;
+  versions: string[];
+}
+
+export interface OpenShiftCatalog {
+  profile: { id: string; name: string; version: number; category: string; description: string };
+  category: { id: string; name: string; intro: string };
+  bases: Record<string, { distribution: string; version: string; el: string; source: string }>;
+  default_base: string;
+  ocp_releases: Record<string, { channel: string; kubernetes: string }>;
+  default_ocp: string;
+  tools: Record<string, OpenShiftTool>;
+  package_groups: Record<string, { label: string; group: string; purpose: string; packages: string[] }>;
+  optional: string[];
+  helpers: { name: string; what: string }[];
+  aliases: Record<string, string>;
+  defaults: { timezone: string; locale: string; prod_pattern: string };
+  tests: Record<string, { label: string; runs_as: string; what: string }>;
+  verified: string;
+}
+
+export interface OpenShiftRequest {
+  base: string;
+  base_reference?: string;
+  base_el?: string;
+  ocp_version: string;
+  versions: Record<string, string>;
+  optional: string[];
+  timezone: string;
+  prod_pattern: string;
+}
+
+export interface OpenShiftRecipeTool {
+  id: string;
+  label: string;
+  purpose: string;
+  group: string;
+  required: boolean;
+  enabled: boolean;
+  version: string;
+  versions: string[];
+  verify: string;
+  follows_ocp: boolean;
+  kind: "download" | "packages";
+  packages?: string[];
+}
+
+export interface OpenShiftRecipe {
+  profile: string;
+  profile_name: string;
+  profile_version: number;
+  base: { key: string; display: string; reference: string; el: string; verified: boolean };
+  ocp: { version: string; minor: string; channel: string; kubernetes: string };
+  tools: OpenShiftRecipeTool[];
+  optional: string[];
+  packages: string[];
+  timezone: string;
+  locale: string;
+  prod_pattern: string;
+  helpers: { name: string; what: string }[];
+  aliases: Record<string, string>;
+  compatibility: { client: string; kubernetes: string; recommended_cluster: string; supported_clusters: string[]; note: string };
+  warnings: string[];
+  estimated_size_gb: number;
+  verified: string;
+}
+
+export interface OpenShiftCommands {
+  verify: string;
+  load: string;
+  tag: string;
+  skopeo_import: string;
+  inspect_archive: string;
+  oci_export: string;
+  distrobox_create: string;
+  distrobox_create_own_network: string;
+  distrobox_enter: string;
+  distrobox_assemble: string;
+  distrobox_remove: string;
+  podman_run: string;
+  versions: string;
+  image: string;
+  alias: string;
+}
+
+export interface OpenShiftResolve {
+  ok: boolean;
+  error?: string;
+  recipe?: OpenShiftRecipe;
+  names?: { name: string; repository: string; tag: string; alias: string };
+  commands?: OpenShiftCommands;
+}
+
+export interface OpenShiftTestRow {
+  id: string;
+  label: string;
+  runs_as: string;
+  what: string;
+  status: "passed" | "failed" | "not_run";
+  summary: string;
+  steps: { name: string; status: string; detail?: string }[];
+}
+
+export interface OpenShiftInstalledTool {
+  tool: string;
+  binary: string;
+  version: string;
+  status: "ok" | "missing" | "mismatch" | "error";
+  expected: string;
+  path: string;
+}
+
+export interface OpenShiftDetail {
+  error?: string;
+  recipe: OpenShiftRecipe;
+  tests: OpenShiftTestRow[];
+  tools_installed: OpenShiftInstalledTool[];
+  archive: string;
+  archive_format: string;
+  commands: OpenShiftCommands;
+  distrobox_ini: string;
+  downloads: DownloadFile[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
@@ -787,6 +920,10 @@ export const api = {
   aimlExport: (buildId: string, format: string) =>
     request<{ status: string }>(`/builds/${buildId}/aiml/export`, { method: "POST", body: JSON.stringify({ format }) }),
   aimlFileUrl: (buildId: string, name: string) => `/api/builds/${buildId}/aiml/files/${name}`,
+  openshiftCatalog: () => request<OpenShiftCatalog>("/openshift/catalog"),
+  openshiftResolve: (openshift: OpenShiftRequest) =>
+    request<OpenShiftResolve>("/openshift/resolve", { method: "POST", body: JSON.stringify({ openshift }) }),
+  openshiftFileUrl: (buildId: string, name: string) => `/api/builds/${buildId}/openshift/files/${name}`,
   gpuReport: (buildId: string, report: string) =>
     request<TrainingDetail>(`/builds/${buildId}/gpu-report`, { method: "POST", body: JSON.stringify({ report }) }),
 

@@ -71,6 +71,12 @@ export default function Dashboard() {
               cluster and generate Slurm batch scripts.
             </div>
           </button>
+          <button className="tile" onClick={() => navigate("/projects/new?category=openshift")}>
+            <div className="tile-title">OpenShift Admin Toolkit</div>
+            <div className="tile-sub">
+              oc, kubectl, Helm, k9s, oc-mirror and OpenShift AI / GPU commands for Podman and Distrobox
+            </div>
+          </button>
           <button className="tile" onClick={() => navigate("/projects/new?category=llm-training")}>
             <div className="tile-title">LLM Training &amp; Fine-tuning</div>
             <div className="tile-sub">LoRA/QLoRA, full fine-tuning, LLaMA-Factory, data preparation</div>

@@ -1,0 +1,63 @@
+#!/bin/bash
+# Routes and Ingresses with host, TLS termination and target service.
+set -uo pipefail
+# shellcheck source=../lib/common.sh
+. "${OPENSHIFT_ADMIN_LIB:-/usr/local/lib/openshift-admin}/common.sh"
+
+usage="Usage: oc-routes [-A | -n NAMESPACE]
+
+Routes (host, path, TLS termination, insecure policy, service, admitted) and
+Ingresses. Plain-HTTP routes are flagged. Without -n or -A: every namespace
+you may list, else the current one."
+oa_usage "$usage" "$@"
+oa_need oc jq
+
+ns='' all=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -A | --all-namespaces) all=1 ;;
+    -n | --namespace) ns=${2:-}; shift ;;
+    *) oa_die 64 "$usage" ;;
+  esac
+  shift
+done
+
+oa_require_login
+oa_prod_banner
+
+if oa_has_api operator.openshift.io; then
+  domain=$(oc_ get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.status.domain}' 2>/dev/null)
+  [ -n "$domain" ] && echo "Default apps domain: $domain"
+fi
+
+if oa_has_api route.openshift.io; then
+  mapfile -t scope < <(oa_scope_args "$ns" "$all" routes.route.openshift.io)
+  oa_head "Routes (${scope[*]})"
+  if routes=$(oc_ get routes "${scope[@]}" -o json 2>/dev/null); then
+    jq -r '.items[] | [.metadata.namespace, .metadata.name, .spec.host + (.spec.path // ""),
+        (.spec.tls.termination // "NONE (http)"), (.spec.tls.insecureEdgeTerminationPolicy // "-"),
+        "\(.spec.to.name):\(.spec.port.targetPort // "-")",
+        ([.status.ingress[]?.conditions[]? | select(.type == "Admitted") | .status][0] // "?")] | @tsv' <<<"$routes" \
+      | (printf 'NAMESPACE\tROUTE\tHOST\tTLS\tINSECURE\tSERVICE\tADMITTED\n'; cat) | oa_table
+    plain=$(jq '[.items[] | select(.spec.tls == null)] | length' <<<"$routes")
+    [ "$plain" -eq 0 ] || oa_warn "$plain route(s) serve plain HTTP"
+  else
+    oa_warn "Not allowed to list routes (${scope[*]})"
+  fi
+fi
+
+mapfile -t scope < <(oa_scope_args "$ns" "$all" ingresses.networking.k8s.io)
+oa_head "Ingresses (${scope[*]})"
+if ing=$(oc_ get ingresses "${scope[@]}" -o json 2>/dev/null); then
+  out=$(jq -r '.items[] | . as $i | (.spec.rules // [{}])[] | [$i.metadata.namespace, $i.metadata.name,
+      (.host // "*"), ($i.spec.ingressClassName // "-"), (if ($i.spec.tls // []) | length > 0 then "yes" else "no" end),
+      ([.http.paths[]? | "\(.path // "/")->\(.backend.service.name):\(.backend.service.port.number // .backend.service.port.name)"] | join(" "))]
+    | @tsv' <<<"$ing")
+  if [ -n "$out" ]; then
+    { printf 'NAMESPACE\tINGRESS\tHOST\tCLASS\tTLS\tBACKENDS\n'; printf '%s\n' "$out"; } | oa_table
+  else
+    echo "None."
+  fi
+else
+  oa_warn "Not allowed to list ingresses (${scope[*]})"
+fi
