@@ -68,16 +68,18 @@ __oa_prompt() {
   # A PS1 set after this profile (e.g. in ~/.bashrc) becomes the base we prefix.
   [ "$PS1" = "${__OA_LAST_PS1:-}" ] || __OA_BASE_PS1=$PS1
   __oa_kube_state
-  local segment='' name=$__OA_CTX
+  # Names come from kubeconfig files, possibly someone else's: PS1 expands $(...)
+  # and backticks, so only plain name characters may reach it.
+  local segment='' name=${__OA_CTX//[^A-Za-z0-9._:\/@-]/_} ns=${__OA_NS//[^A-Za-z0-9._-]/_}
   if [ -n "$name" ]; then
     # oc login names contexts namespace/api-host:port/user; show the cluster and user.
     if [[ $name =~ ^[^/]*/([^/:]+)[^/]*/(.+)$ ]]; then
       name="${BASH_REMATCH[1]}(${BASH_REMATCH[2]})"
     fi
     if [ "$__OA_IS_PROD" = 1 ]; then
-      segment="\[\e[1;97;41m\] PROD \[\e[0m\] \[\e[1;31m\][$name:${__OA_NS:-default}]\[\e[0m\] "
+      segment="\[\e[1;97;41m\] PROD \[\e[0m\] \[\e[1;31m\][$name:${ns:-default}]\[\e[0m\] "
     else
-      segment="\[\e[36m\][$name:${__OA_NS:-default}]\[\e[0m\] "
+      segment="\[\e[36m\][$name:${ns:-default}]\[\e[0m\] "
     fi
   fi
   PS1="$segment${__OA_BASE_PS1}"

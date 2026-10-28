@@ -542,3 +542,25 @@ def test_other_builds_have_no_openshift_detail(os_client):
     detail = os_client.get(f"/api/builds/{build['id']}").json()
     assert detail["openshift"] is None and "openshift" not in detail["manifest"]
     assert os_client.get(f"/api/builds/{build['id']}/openshift/files/README.md").status_code == 404
+
+
+@needs_tools
+def test_prompt_never_runs_names_from_a_kubeconfig(tmp_path):
+    """A context name like $(touch x) must be shown, not executed, when PS1 is drawn."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "pwned"
+    (bin_dir / "kubectl").write_text(
+        "#!/bin/sh\ncase \"$*\" in\n"
+        f"  *current-context*) echo 'evil$(touch {marker})`touch {marker}`' ;;\n"
+        f"  *namespace*) echo 'ns$(touch {marker})' ;;\n"
+        "  *) echo https://api.example.com:6443 ;;\nesac\n")
+    (bin_dir / "kubectl").chmod(0o755)
+    script = (f"source {ASSETS / 'profile.d/openshift-admin.sh'}; __oa_prompt; "
+              'printf "%s\\n" "${PS1@P}"')
+    result = subprocess.run([BASH, "--norc", "-ic", script], capture_output=True, text=True, timeout=30,
+                            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path)})
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    shown = result.stdout
+    assert "touch" in shown and "$(" not in shown and "`" not in shown
