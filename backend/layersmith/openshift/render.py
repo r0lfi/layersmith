@@ -18,6 +18,7 @@ import shutil
 from pathlib import Path
 
 ASSET_DIR = Path(__file__).with_name("assets")
+EXECUTABLE_DIRS = ("bin", "build")
 LIBEXEC = "/usr/local/libexec/openshift-admin"
 SHARE = "/usr/local/share/openshift-admin"
 CHECK_PATH = f"{LIBEXEC}/layersmith-openshift-check"
@@ -51,15 +52,16 @@ def install_lines(recipe: dict) -> list[str]:
     """After the package install: clients, helpers, shell setup, completion and the version inventory."""
     return [
         "",
-        f"COPY --chmod=0755 openshift/build/ {LIBEXEC}/",
-        f"COPY --chmod=0644 openshift/downloads.tsv openshift/checks.tsv {SHARE}/",
+        "# Modes come from the build context (Docker's classic builder has no COPY option for them).",
+        f"COPY openshift/build/ {LIBEXEC}/",
+        f"COPY openshift/downloads.tsv openshift/checks.tsv {SHARE}/",
         f"RUN {LIBEXEC}/install-tools.sh {SHARE}/downloads.tsv",
-        "COPY --chmod=0755 openshift/bin/ /usr/local/bin/",
-        "COPY --chmod=0644 openshift/lib/common.sh /usr/local/lib/openshift-admin/common.sh",
-        "COPY --chmod=0644 openshift/profile.d/openshift-admin.sh /etc/profile.d/openshift-admin.sh",
-        "COPY --chmod=0644 openshift/completion/openshift-admin /usr/share/bash-completion/completions/openshift-admin",
-        "COPY --chmod=0644 openshift/toolkit.env /etc/openshift-admin/toolkit.env",
-        "COPY --chmod=0644 openshift/README.md /usr/share/doc/openshift-admin/README.md",
+        "COPY openshift/bin/ /usr/local/bin/",
+        "COPY openshift/lib/common.sh /usr/local/lib/openshift-admin/common.sh",
+        "COPY openshift/profile.d/openshift-admin.sh /etc/profile.d/openshift-admin.sh",
+        "COPY openshift/completion/openshift-admin /usr/share/bash-completion/completions/openshift-admin",
+        "COPY openshift/toolkit.env /etc/openshift-admin/toolkit.env",
+        "COPY openshift/README.md /usr/share/doc/openshift-admin/README.md",
         f'ENV LANG="{recipe["locale"]}" TZ="{recipe["timezone"]}"',
         f'RUN {LIBEXEC}/finish.sh "{recipe["timezone"]}" "{recipe["locale"]}"',
         "",
@@ -97,6 +99,11 @@ def write_context(context: Path, recipe: dict, readme: str) -> list[str]:
     (root / "checks.tsv").write_text(checks_tsv(recipe), encoding="utf-8")
     (root / "toolkit.env").write_text(toolkit_env(recipe), encoding="utf-8")
     (root / "README.md").write_text(readme, encoding="utf-8")
+    # COPY keeps the context's modes, so they are set here rather than left to the
+    # installed package's or the umask's: programs 0755, everything else 0644.
+    for path in [root, *root.rglob("*")]:
+        executable = path.is_dir() or path.parent.name in EXECUTABLE_DIRS
+        path.chmod(0o755 if executable else 0o644)
     return sorted(str(p.relative_to(context)) for p in root.rglob("*") if p.is_file())
 
 

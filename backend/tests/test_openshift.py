@@ -149,6 +149,8 @@ def test_containerfile_updates_verifies_and_leaves_user_to_distrobox():
     assert 'io.layersmith.openshift.ocp="4.22.18"' in text
     for forbidden in ("insecure", "KUBECONFIG", "--token", "curl | sh", "| bash", "systemctl", "sshd"):
         assert forbidden not in text, forbidden
+    # Docker's classic builder (the app image ships no buildx) refuses COPY --chmod.
+    assert "--chmod" not in text
 
 
 def test_build_context_holds_the_manifests_and_scripts(tmp_path):
@@ -164,6 +166,11 @@ def test_build_context_holds_the_manifests_and_scripts(tmp_path):
     assert downloads[0][2] == "oc=/usr/local/bin/oc kubectl=/usr/local/bin/kubectl"
     env = (tmp_path / "openshift/toolkit.env").read_text()
     assert ': "${OPENSHIFT_ADMIN_PROD_PATTERN:=prod}"' in env
+    # Plain COPY keeps these modes, whatever the installed package or umask had.
+    modes = {name: (tmp_path / name).stat().st_mode & 0o777 for name in files}
+    assert modes["openshift/build/install-tools.sh"] == modes["openshift/bin/oc-status"] == 0o755
+    assert modes["openshift/profile.d/openshift-admin.sh"] == modes["openshift/downloads.tsv"] == 0o644
+    assert (tmp_path / "openshift/bin").stat().st_mode & 0o777 == 0o755
 
 
 # ------------------------------------------------------------ shell scripts
