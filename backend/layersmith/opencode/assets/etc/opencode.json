@@ -1,0 +1,31 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Site-wide opencode settings for everyone using the shared opencode container.
+  // On the host this file is /etc/opencode/opencode.json (mounted read-only into the
+  // container); edit it there. Changes apply to the next opencode started - no restart.
+  //
+  // Users add their own settings in ~/.config/opencode/opencode.json, and a project
+  // can carry an opencode.json in its repository; those are merged over this file.
+  // Everyone who can run opencode can read this file.
+  "autoupdate": false,
+  "share": "disabled",
+
+  // Your OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, TGI, ...). Remove the
+  // comment markers and fill in host, port and model (trailing commas are allowed):
+  //
+  // "provider": {
+  //   "local": {
+  //     "npm": "@ai-sdk/openai-compatible",
+  //     "name": "Local LLM",
+  //     "options": {
+  //       "baseURL": "http://LLM-HOST:8000/v1"
+  //       // "apiKey": "only if the endpoint requires one"
+  //     },
+  //     "models": {
+  //       "MODEL-NAME": { "name": "MODEL-NAME", "limit": { "context": 131072, "output": 16384 } }
+  //     }
+  //   }
+  // },
+  // "model": "local/MODEL-NAME",
+  // "small_model": "local/MODEL-NAME"
+}

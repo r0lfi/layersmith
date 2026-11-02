@@ -8,6 +8,7 @@ import { SplitControls, SplitFiles, useSplit } from "../components/SplitArchive"
 import { GpuKit } from "../components/GpuKit";
 import { AiMlPanel } from "../components/AiMl";
 import { OpenShiftPanel } from "../components/OpenShift";
+import { OpencodePanel } from "../components/Opencode";
 
 function LogLine({ line }: { line: string }) {
   const className = /^STEP |^--> /.test(line)
@@ -247,6 +248,7 @@ export default function BuildDetail() {
 
       {build.gpu_benchmark && <GpuBenchmarkPanel build={build} />}
       {build.openshift && <OpenShiftPanel build={build} />}
+      {build.opencode && <OpencodePanel build={build} />}
       {build.aiml && <AiMlPanel build={build} onChange={(aiml) => setData({ ...build, aiml })} reload={reload} />}
       {build.gpu_benchmark && build.status === "ready" && build.has_export && <GpuKit buildId={build.id} />}
 

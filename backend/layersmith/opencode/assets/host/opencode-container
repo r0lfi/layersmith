@@ -1,0 +1,72 @@
+#!/bin/bash
+# Run, stop and inspect the shared opencode container (administrators; root).
+#
+#   opencode-container start     run it in the foreground (what the systemd unit does)
+#   opencode-container stop      stop it
+#   opencode-container status    is it running, which image, who is using it
+#   opencode-container command   print the runtime command `start` runs
+#
+# Settings: /etc/opencode-container/container.conf
+set -euo pipefail
+
+CONF=/etc/opencode-container/container.conf
+die() { echo "opencode-container: $*" >&2; exit 1; }
+[[ -r $CONF ]] || die "$CONF is missing; run install-host.sh"
+RUNTIME=podman NAME=opencode IMAGE='' MOUNTS=/home NETWORK=host HOST_CA=auto EXTRA_ARGS=()
+# shellcheck source=/dev/null
+. "$CONF"
+[[ -n $IMAGE ]] || die "IMAGE is not set in $CONF"
+
+run_args() {
+  args=(run --rm --name "$NAME" --init --network "$NETWORK"
+        --security-opt label=disable --security-opt no-new-privileges --cap-drop ALL
+        -v /etc/opencode:/etc/opencode:ro)
+  # With the host's network the container also has the host's name (Podman refuses another one).
+  [[ $NETWORK == host ]] || args+=(--hostname "$NAME")
+  [[ -e /etc/localtime ]] && args+=(-v /etc/localtime:/etc/localtime:ro)
+  local m bundle=
+  for m in $MOUNTS; do
+    [[ -d $m ]] || die "MOUNTS: $m is not a directory"
+    args+=(-v "$m:$m:rslave")
+  done
+  # opencode trusts its own CA list; NODE_EXTRA_CA_CERTS adds the host's, so an
+  # endpoint with a certificate from an internal CA is accepted.
+  if [[ $HOST_CA != no ]]; then
+    for bundle in /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/ssl/certs/ca-certificates.crt; do
+      [[ -r $bundle ]] && break
+      bundle=
+    done
+    if [[ -n $bundle ]]; then
+      args+=(-v "$bundle:/etc/opencode-host-ca.pem:ro" -e NODE_EXTRA_CA_CERTS=/etc/opencode-host-ca.pem)
+    fi
+  fi
+  args+=("${EXTRA_ARGS[@]}" "$IMAGE" /usr/local/libexec/opencode/container-init)
+}
+
+case ${1:-} in
+  start)
+    "$RUNTIME" rm -f "$NAME" >/dev/null 2>&1 || true
+    run_args
+    exec "$RUNTIME" "${args[@]}" ;;
+  stop)
+    exec "$RUNTIME" stop -t 10 "$NAME" ;;
+  command)
+    run_args
+    printf '%q ' "$RUNTIME" "${args[@]}"
+    echo ;;
+  status)
+    state=$("$RUNTIME" container inspect --format '{{.State.Running}}' "$NAME" 2>/dev/null || echo "not created")
+    echo "container: $NAME ($state)"
+    echo "image:     $IMAGE"
+    echo "runtime:   $RUNTIME"
+    echo "mounts:    $MOUNTS"
+    if [[ $state == true ]]; then
+      # Not as root: root has no capabilities in here, so it cannot write /root.
+      echo "opencode:  $("$RUNTIME" exec --user 65534 -e HOME=/tmp "$NAME" opencode --version 2>/dev/null || echo '?')"
+      echo "sessions:"
+      "$RUNTIME" exec "$NAME" ps -o user=,pid=,etime=,args= -C opencode 2>/dev/null | sed 's/^/  /' || true
+    fi ;;
+  *)
+    sed -n '2,9s/^# \{0,1\}//p' "$0"
+    exit 64 ;;
+esac

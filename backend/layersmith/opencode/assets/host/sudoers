@@ -1,0 +1,5 @@
+# Members of @GROUP@ may start opencode in the shared opencode container as
+# themselves. opencode-enter uses only SUDO_UID and the current directory; it
+# never runs anything in the container as root except ensure-user.
+Defaults!/usr/local/libexec/opencode-container/opencode-enter env_keep += "COLORTERM LANG LC_ALL"
+%@GROUP@ ALL=(root) NOPASSWD: /usr/local/libexec/opencode-container/opencode-enter

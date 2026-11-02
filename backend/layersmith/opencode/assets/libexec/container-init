@@ -1,0 +1,10 @@
+#!/bin/bash
+# The shared opencode container's main process: it only keeps the container
+# running. Users' opencode sessions are started next to it with `podman exec`
+# (by the host's `opencode` command); the runtime's --init reaps them.
+trap 'exit 0' TERM INT
+echo "opencode container ready: $(opencode --version 2>/dev/null || echo 'opencode missing')"
+while :; do
+  sleep 3600 &
+  wait $!
+done

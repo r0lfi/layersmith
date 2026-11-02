@@ -1,0 +1,10 @@
+#!/bin/sh
+# opencode, running in the shared opencode container as you, in this directory.
+# Installed by install-host.sh; `opencode-shell` opens a shell there instead.
+ENTER=/usr/local/libexec/opencode-container/opencode-enter
+if ! sudo -n -l "$ENTER" >/dev/null 2>&1; then
+  echo "opencode: you are not allowed to use the shared opencode container on this host." >&2
+  echo "Ask an administrator to add you: usermod -aG opencode $(id -un)  (then log in again)" >&2
+  exit 1
+fi
+exec sudo -n "$ENTER" "$@"

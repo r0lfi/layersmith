@@ -127,6 +127,16 @@ and shows you the Containerfile it produced before anything is built.
   production marker, and a Distrobox Assemble manifest. Checks after each build
   prove the tools and versions as a non-root user and that no kubeconfig or
   credential is in any layer. See [docs/openshift-admin.md](docs/openshift-admin.md).
+- **opencode Shared Terminal** — the opencode coding agent for an air-gapped
+  host: one always-running container, and an `opencode` command on the host
+  that runs it inside as the calling user, in the directory they are in.
+  Several users at once, each with their own sessions in their own home; no
+  capabilities and no sudo inside. opencode and ripgrep are pinned by sha256,
+  and update checks, model-catalogue and language-server downloads are off.
+  `install-host.sh` comes with the build and sets up the command, a sudo rule
+  for one group and a systemd unit; you put your own OpenAI-compatible
+  endpoint (vLLM, Ollama, ...) in `/etc/opencode/opencode.json`. See
+  [docs/opencode.md](docs/opencode.md).
 - **NVIDIA GPU & LLM Benchmark** — a Quick build that produces one offline
   Podman image with an interactive terminal dashboard: live GPU status, LLM
   token speed and latency with vLLM on local models, GEMM compute, memory

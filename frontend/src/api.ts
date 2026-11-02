@@ -45,6 +45,8 @@ export interface Build {
   aiml?: AimlDetail | null;
   openshift_ocp?: string | null;
   openshift?: OpenShiftDetail | null;
+  opencode_version?: string | null;
+  opencode?: OpencodeDetail | null;
 }
 
 /** Split download of an image archive: parts are byte ranges of the export. */
@@ -801,6 +803,85 @@ export interface OpenShiftInstalledTool {
   path: string;
 }
 
+export interface OpencodeCatalog {
+  profile: { id: string; name: string; version: number; category: string; description: string };
+  bases: Record<string, { distribution: string; version: string; el: string; source: string }>;
+  default_base: string;
+  versions: string[];
+  default_version: string;
+  cpu_variants: Record<string, { label: string; asset: string }>;
+  default_cpu: string;
+  ripgrep: string;
+  package_groups: Record<string, { label: string; purpose: string; packages: string[] }>;
+  optional: string[];
+  default_optional: string[];
+  environment: Record<string, string>;
+  host: { container: string; group: string; mounts: string };
+  tests: Record<string, { label: string; runs_as: string; what: string }>;
+  verified: string;
+}
+
+export interface OpencodeRequest {
+  base: string;
+  base_reference?: string;
+  base_el?: string;
+  opencode_version: string;
+  cpu: string;
+  optional: string[];
+}
+
+export interface OpencodeRecipe {
+  profile: string;
+  profile_name: string;
+  profile_version: number;
+  base: { key: string; display: string; reference: string; el: string; verified: boolean };
+  opencode: { version: string; cpu: string; asset: string };
+  tools: { id: string; label: string; version: string; enabled: boolean; kind: string; purpose: string; verify: string }[];
+  optional: string[];
+  packages: string[];
+  environment: Record<string, string>;
+  warnings: string[];
+  estimated_size_gb: number;
+  verified: string;
+}
+
+export interface OpencodeCommands {
+  verify: string;
+  install: string;
+  install_users: string;
+  update: string;
+  extract_installer: string;
+  load: string;
+  add_user: string;
+  config: string;
+  status: string;
+  restart: string;
+  uninstall: string;
+  use: string;
+  shell: string;
+  image: string;
+}
+
+export interface OpencodeResolve {
+  ok: boolean;
+  error?: string;
+  recipe?: OpencodeRecipe;
+  names?: { name: string; repository: string; tag: string };
+  commands?: OpencodeCommands;
+}
+
+export interface OpencodeDetail {
+  error?: string;
+  recipe: OpencodeRecipe;
+  tests: OpenShiftTestRow[];
+  tools_installed: OpenShiftInstalledTool[];
+  archive: string;
+  archive_format: string;
+  commands: OpencodeCommands;
+  site_config: string;
+  downloads: DownloadFile[];
+}
+
 export interface OpenShiftDetail {
   error?: string;
   recipe: OpenShiftRecipe;
@@ -924,6 +1005,10 @@ export const api = {
   openshiftResolve: (openshift: OpenShiftRequest) =>
     request<OpenShiftResolve>("/openshift/resolve", { method: "POST", body: JSON.stringify({ openshift }) }),
   openshiftFileUrl: (buildId: string, name: string) => `/api/builds/${buildId}/openshift/files/${name}`,
+  opencodeCatalog: () => request<OpencodeCatalog>("/opencode/catalog"),
+  opencodeResolve: (opencode: OpencodeRequest) =>
+    request<OpencodeResolve>("/opencode/resolve", { method: "POST", body: JSON.stringify({ opencode }) }),
+  opencodeFileUrl: (buildId: string, name: string) => `/api/builds/${buildId}/opencode/files/${name}`,
   gpuReport: (buildId: string, report: string) =>
     request<TrainingDetail>(`/builds/${buildId}/gpu-report`, { method: "POST", body: JSON.stringify({ report }) }),
 

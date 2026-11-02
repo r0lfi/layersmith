@@ -104,6 +104,15 @@ def openshift_recipe(spec: dict | None) -> dict | None:
     return recipes.resolve(spec["openshift"])
 
 
+def opencode_recipe(spec: dict | None) -> dict | None:
+    """The resolved recipe of an opencode Shared Terminal build, or None for any other build."""
+    if not (spec or {}).get("opencode"):
+        return None
+    from layersmith.opencode import recipes
+
+    return recipes.resolve(spec["opencode"])
+
+
 def gpu_benchmark_storage(recipe: dict | None = None) -> dict:
     """Free space where images are exported, against what a GPU benchmark (or AI/ML) build needs.
 
@@ -143,6 +152,7 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
     gpu_recipe = gpu_benchmark_recipe(build.spec)
     ai_recipe = aiml_recipe(build.spec)
     os_recipe = openshift_recipe(build.spec)
+    oc_recipe = opencode_recipe(build.spec)
     training = None
     if recipe:
         training = {"profile": recipe["profile"], "profile_version": recipe["profile_version"],
@@ -188,11 +198,23 @@ def manifest_for(project: Project, build: Build, export_sha: str | None = None) 
                                               ((((build.checks or {}).get("results") or {}).get("user") or {})
                                                .get("info") or {}).get("tools") or []}}}
            if os_recipe else {}),
+        **({"opencode": {**_opencode_summary(oc_recipe),
+                         "checks": {k: v.get("status") for k, v in ((build.checks or {}).get("results") or {}).items()},
+                         "tools_installed": {t.get("binary"): t.get("version") for t in
+                                             ((((build.checks or {}).get("results") or {}).get("user") or {})
+                                              .get("info") or {}).get("tools") or []}}}
+           if oc_recipe else {}),
     }
 
 
 def _openshift_summary(recipe: dict) -> dict:
     from layersmith.openshift import recipes
+
+    return recipes.summary(recipe)
+
+
+def _opencode_summary(recipe: dict) -> dict:
+    from layersmith.opencode import recipes
 
     return recipes.summary(recipe)
 
@@ -370,6 +392,13 @@ class BuildService:
             from layersmith.openshift import docs, render as os_render
 
             os_render.write_context(context, os_recipe, docs.markdown(os_recipe, build.image_ref or "IMAGE"))
+        oc_recipe = opencode_recipe(build.spec)
+        if oc_recipe:
+            from layersmith.opencode import docs as oc_docs, render as oc_render
+
+            image = build.image_ref or "IMAGE"
+            archive = export_filename(image.rsplit(":", 1)[0], build.version)
+            oc_render.write_context(context, oc_recipe, oc_docs.markdown(oc_recipe, image, archive), image, archive)
         return context
 
     # --------------------------------------------------------------- run
@@ -435,6 +464,10 @@ class BuildService:
                     build.checks = self.run_aiml_checks(build_id, reference, ai_recipe)
                 if openshift_recipe(build.spec):
                     build.checks = self.run_openshift_checks(build_id, reference)
+                if opencode_recipe(build.spec):
+                    from layersmith.opencode import render as oc_render
+
+                    build.checks = self.run_openshift_checks(build_id, reference, oc_render.check_runs())
 
                 self._set_status(build_id, "exporting")
                 export = Path(self.settings.image_dir) / export_filename(project_snapshot["repository"],
@@ -623,8 +656,11 @@ class BuildService:
         self._emit(build_id, f"Basic test: {result['status'].upper()}")
         return {"results": results}
 
-    def run_openshift_checks(self, build_id: str, reference: str) -> dict:
-        """The image check as root and the user check as an unprivileged uid; never fails the build."""
+    def run_openshift_checks(self, build_id: str, reference: str, runs: list[dict] | None = None) -> dict:
+        """The image check as root and the user check as an unprivileged uid; never fails the build.
+
+        Also runs the opencode Shared Terminal's checks (`runs`), which use the same result format.
+        """
         from layersmith.openshift import checks, render as os_render
 
         runner = getattr(self.backend, "run_container", None)
@@ -633,7 +669,7 @@ class BuildService:
             return {"results": {}}
         self._set_status(build_id, "testing")
         results = {}
-        for run in os_render.check_runs():
+        for run in runs or os_render.check_runs():
             who = f"as {run['user']}" if run["user"] else "as root"
             self._emit(build_id, f"--> Check: {run['id']} ({who}, networking disabled, capabilities dropped)")
             try:
@@ -664,6 +700,23 @@ class BuildService:
         image = build.image_ref or "IMAGE"
         (target / "README.md").write_text(docs.markdown(recipe, image, archive), encoding="utf-8")
         (target / f"{docs.CONTAINER}.ini").write_text(docs.distrobox_ini(recipe, image), encoding="utf-8")
+        (target / "checks.json").write_text(json.dumps((build.checks or {}).get("results") or {}, indent=2) + "\n",
+                                            encoding="utf-8")
+
+    def _opencode_bundle(self, build: Build, recipe: dict, staging: Path, archive: str) -> None:
+        """opencode/: README, install-host.sh, the site settings template and check results."""
+        from layersmith.opencode import docs, render as oc_render
+
+        target = staging / "opencode"
+        target.mkdir()
+        image = build.image_ref or "IMAGE"
+        name = Path(archive).name
+        (target / "README.md").write_text(docs.markdown(recipe, image, name), encoding="utf-8")
+        installer = target / docs.INSTALLER
+        installer.write_text(oc_render.install_script(image, name), encoding="utf-8")
+        installer.chmod(0o755)
+        (target / "opencode.json").write_text((oc_render.ASSET_DIR / "etc" / "opencode.json").read_text(),
+                                              encoding="utf-8")
         (target / "checks.json").write_text(json.dumps((build.checks or {}).get("results") or {}, indent=2) + "\n",
                                             encoding="utf-8")
 
@@ -796,7 +849,10 @@ class BuildService:
                                        if aiml_recipe(build.spec) else "")
                                     + ("  openshift/README.md     Distrobox and Podman, clusters, commands, versions\n"
                                        "  openshift/openshift-admin.ini  distrobox assemble create --file ...\n"
-                                       if openshift_recipe(build.spec) else "")),
+                                       if openshift_recipe(build.spec) else "")
+                                    + ("  opencode/README.md      Install on the host, LLM endpoint, users, operation\n"
+                                       "  opencode/install-host.sh  sudo bash opencode/install-host.sh --archive image/...\n"
+                                       if opencode_recipe(build.spec) else "")),
                 encoding="utf-8")
 
             # What was known about this image when it was bundled. Absent
@@ -829,6 +885,9 @@ class BuildService:
             os_recipe = openshift_recipe(build.spec)
             if os_recipe:
                 self._openshift_bundle(build, os_recipe, staging, f"image/{export.name}")
+            oc_recipe = opencode_recipe(build.spec)
+            if oc_recipe:
+                self._opencode_bundle(build, oc_recipe, staging, f"image/{export.name}")
 
             sums = []
             for path in sorted(staging.rglob("*")):

@@ -1,0 +1,173 @@
+#!/bin/bash
+# Post-build checks of an opencode Shared Terminal image. LayerSmith runs them
+# with networking disabled and every capability dropped, as the shared
+# container itself runs:
+#
+#   image  as root: no sudo, SSH server or stored credentials; the offline
+#          settings; the host kit; ensure-user adds a user, its groups, and
+#          removes a group the host no longer has
+#   user   as an unprivileged uid (not created by ensure-user): every tool and its
+#          version, opencode's configuration, models list and code search
+#          without a network, and its data kept in $HOME
+#
+# The last line is the result: LAYERSMITH_CHECK_RESULT {json}.
+set -uo pipefail
+
+mode=${1:-}
+case $mode in image | user) ;; *) echo "usage: layersmith-opencode-check image|user" >&2; exit 64 ;; esac
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+steps="$work/steps.jsonl"
+: >"$steps"
+info='{}'
+
+step() {  # step NAME passed|failed DETAIL
+  jq -cn --arg name "$1" --arg status "$2" --arg detail "${3:0:600}" '{name: $name, status: $status, detail: $detail}' >>"$steps"
+  printf '%-8s %s: %s\n' "$2" "$1" "${3:0:300}"
+}
+
+check_image() {
+  if command -v sudo >/dev/null 2>&1 || rpm -q sudo >/dev/null 2>&1; then
+    step "no sudo" failed "sudo is installed"
+  else
+    step "no sudo" passed "users cannot become root inside the container"
+  fi
+  if command -v sshd >/dev/null 2>&1 || rpm -q openssh-server >/dev/null 2>&1; then
+    step "no SSH server" failed "openssh-server is installed"
+  else
+    step "no SSH server" passed "ssh client only"
+  fi
+
+  local found='' f
+  for f in /root/.ssh /root/.netrc /root/.docker/config.json /root/.local/share/opencode /root/.config/opencode \
+           /home/*/.ssh /home/*/.local/share/opencode /etc/containers/auth.json; do
+    [ -e "$f" ] && found+="$f "
+  done
+  if [ -n "$found" ]; then
+    step "no stored credentials" failed "present: $found"
+  else
+    step "no stored credentials" passed "no SSH keys, .netrc, registry auth or opencode auth/sessions in the image"
+  fi
+
+  local missing='' pair
+  for pair in OPENCODE_CONFIG=/etc/opencode/opencode.json OPENCODE_DISABLE_AUTOUPDATE=1 \
+              OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_LSP_DOWNLOAD=1; do
+    [ "$(printenv "${pair%%=*}")" = "${pair#*=}" ] || missing+="${pair%%=*} "
+  done
+  if [ -z "$missing" ] && [ -r /etc/opencode/opencode.json ]; then
+    step "offline settings" passed "no update check, no models.dev download, no LSP downloads; site config /etc/opencode/opencode.json"
+  else
+    step "offline settings" failed "not set: ${missing:-/etc/opencode/opencode.json missing}"
+  fi
+
+  missing=''
+  for f in install-host.sh opencode opencode-shell opencode-enter opencode-container opencode-container.service \
+           sudoers opencode.json README.md; do
+    [ -f "/usr/local/share/opencode/host/$f" ] || missing+="$f "
+  done
+  if [ -z "$missing" ] && [ -x /usr/local/libexec/opencode/container-init ]; then
+    step "host kit" passed "install-host.sh and the host files are in /usr/local/share/opencode/host"
+  else
+    step "host kit" failed "missing: ${missing:-container-init}"
+  fi
+
+  local ensure=/usr/local/libexec/opencode/ensure-user out first second groups1 groups2 odd problems=''
+  groups_of() { id -Gn "$1" 2>/dev/null | tr ' ' '\n' | sort | tr '\n' ' '; }
+  out=$("$ensure" alice 4242 4242 /home/alice 4242:alice 4300:devs 4301:ops 2>&1)
+  first=$(getent passwd 4242)
+  groups1=$(groups_of 4242)
+  # Called again after the host moved the home and dropped a group.
+  "$ensure" alice 4242 4242 /srv/home/alice 4242:alice 4300:devs >/dev/null 2>&1
+  second=$(getent passwd 4242)
+  groups2=$(groups_of 4242)
+  odd=$("$ensure" 'bob@example.com' 4243 4243 /home/bob 2>&1)
+  [ "$out" = alice ] || problems+="name=$out; "
+  [ "$first" = "alice:x:4242:4242:opencode user:/home/alice:/bin/bash" ] || problems+="first=$first; "
+  [ "$groups1" = "alice devs ops " ] || problems+="groups=$groups1; "
+  [ "$second" = "alice:x:4242:4242:opencode user:/srv/home/alice:/bin/bash" ] || problems+="second=$second; "
+  [ "$groups2" = "alice devs " ] || problems+="groups after change=$groups2; "
+  [ "$(grep -c '^alice:' /etc/passwd)" = 1 ] || problems+="duplicate passwd entry; "
+  [ "$odd" = u4243 ] || problems+="odd name=$odd; "
+  "$ensure" root 0 0 /root >/dev/null 2>&1 && problems+="accepted uid 0; "
+  if [ -z "$problems" ]; then
+    step "ensure-user" passed "adds the host user with its groups, follows home and group changes, refuses uid 0, odd names become u<uid>"
+  else
+    step "ensure-user" failed "$problems"
+  fi
+  info=$(jq -cn --arg os "$(. /etc/os-release && echo "$PRETTY_NAME")" '{os: $os, uid: 0}')
+}
+
+check_user() {
+  local uid out versions code
+  uid=$(id -u)
+  export HOME=$work/home
+  mkdir -p "$HOME"
+  if [ "$uid" = 0 ]; then
+    step "unprivileged" failed "running as root"
+  else
+    step "unprivileged" passed "uid $uid, as a host user who has never used opencode here"
+  fi
+
+  versions=$(/usr/local/bin/opencode-versions --json 2>/dev/null)
+  code=$?
+  [ -n "$versions" ] || versions='[]'
+  if [ "$code" -eq 0 ]; then
+    step "tools" passed "$(jq -r 'map("\(.binary) \(.version)") | join(", ")' <<<"$versions")"
+  else
+    step "tools" failed "$(jq -r 'map(select(.status != "ok") | "\(.binary): \(.status)") | join(", ")' <<<"$versions")"
+  fi
+
+  cd "$work" || exit 1
+  out=$(timeout 60 opencode debug config 2>&1)
+  code=$?
+  if [ "$code" -eq 0 ] && grep -q '"autoupdate": false' <<<"$out" && grep -q '"share": "disabled"' <<<"$out"; then
+    step "configuration offline" passed "opencode debug config: site settings loaded, no network needed"
+  else
+    step "configuration offline" failed "exit $code: ${out//$'\n'/ }"
+  fi
+
+  # A local provider written the way the site config documents it.
+  mkdir -p "$HOME/.config/opencode"
+  cat >"$HOME/.config/opencode/opencode.json" <<'EOF'
+{
+  // as in /etc/opencode/opencode.json
+  "provider": {"local": {"npm": "@ai-sdk/openai-compatible", "name": "Local LLM",
+    "options": {"baseURL": "http://127.0.0.1:9/v1"}, "models": {"check-model": {"name": "check-model"}}}},
+  "model": "local/check-model",
+}
+EOF
+  out=$(timeout 60 opencode models local 2>&1)
+  code=$?
+  if [ "$code" -eq 0 ] && grep -qx 'local/check-model' <<<"$out"; then
+    step "local provider" passed "an OpenAI-compatible endpoint from the config is listed (built-in provider, nothing from npm)"
+  else
+    step "local provider" failed "exit $code: ${out//$'\n'/ }"
+  fi
+
+  mkdir -p "$work/project"
+  printf 'def needle():\n    return 42\n' >"$work/project/code.py"
+  out=$(cd "$work/project" && rg -n 'needle' 2>&1)
+  if grep -q 'code.py:1:def needle' <<<"$out"; then
+    step "code search" passed "ripgrep is on PATH, so opencode never downloads it"
+  else
+    step "code search" failed "${out//$'\n'/ }"
+  fi
+
+  if [ -f "$HOME/.local/share/opencode/opencode.db" ]; then
+    step "per-user data" passed "sessions and settings are kept in \$HOME/.local/share/opencode (the user's own home on the host)"
+  else
+    step "per-user data" failed "no opencode database in $HOME/.local/share/opencode"
+  fi
+  info=$(jq -cn --argjson tools "$versions" --arg uid "$uid" '{tools: $tools, uid: ($uid | tonumber)}')
+}
+
+"check_$mode"
+status=passed
+grep -q '"status":"failed"' "$steps" && status=failed
+result=$(jq -cn --arg check "$mode" --arg status "$status" --arg image "${LAYERSMITH_IMAGE:-}" \
+  --slurpfile steps "$steps" --argjson info "$info" \
+  '{check: $check, status: $status, image: $image, steps: $steps, info: $info}')
+echo "LAYERSMITH_CHECK_RESULT $result"
+[ "$status" = passed ]

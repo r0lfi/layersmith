@@ -1,0 +1,15 @@
+[Unit]
+Description=Shared opencode container (opencode for every user on this host)
+Documentation=file:///etc/opencode-container/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/libexec/opencode-container/opencode-container start
+ExecStop=/usr/local/libexec/opencode-container/opencode-container stop
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

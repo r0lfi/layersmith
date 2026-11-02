@@ -123,11 +123,15 @@ def validate_spec(spec):
     has_gpu_benchmark = spec.get("gpu_benchmark") is not None and "gpu_benchmark" in spec
     has_aiml = bool(spec.get("aiml"))
     has_openshift = spec.get("openshift") is not None and "openshift" in spec
-    if has_training + has_gpu_benchmark + has_aiml + has_openshift > 1:
+    has_opencode = spec.get("opencode") is not None and "opencode" in spec
+    if has_training + has_gpu_benchmark + has_aiml + has_openshift + has_opencode > 1:
         raise InvalidSpec("Choose either an LLM training profile, the GPU benchmark template, an "
-                          "AI/ML/GPU template or the OpenShift Admin Toolkit, not several.")
+                          "AI/ML/GPU template, the OpenShift Admin Toolkit or the opencode Shared Terminal, "
+                          "not several.")
     if has_openshift:
         _apply_openshift(spec)
+    if has_opencode:
+        _apply_opencode(spec)
     if has_aiml:
         _apply_aiml(spec)
     if has_gpu_benchmark:
@@ -302,6 +306,36 @@ def _apply_openshift(spec):
     spec["openshift"] = request
     if spec.get("architecture") not in (None, "amd64"):
         raise InvalidSpec("The OpenShift Admin Toolkit is built for linux/amd64.")
+    spec["architecture"] = "amd64"
+    base = recipe["base"]
+    if base["distribution"]:
+        spec["base"] = {"distribution": base["distribution"], "version": base["version"]}
+    else:
+        spec["base"] = {"source": base["reference"], "family": "rpm", "display": base["display"]}
+
+
+def _apply_opencode(spec):
+    """The opencode Shared Terminal owns its Enterprise Linux base, packages and layout.
+
+    Extra distro packages, environment variables and labels may still be
+    added; everything else comes from the profile.
+    """
+    from layersmith.opencode import recipes  # imported here: recipes imports this module
+
+    for key in ("presets", "packages", "tools", "files", "scripts", "user", "workdir"):
+        if spec.get(key):
+            raise InvalidSpec(f"The opencode Shared Terminal is made from its profile; remove the custom {key}, or "
+                              "take the Containerfile over in Advanced mode.")
+    try:
+        recipe = recipes.resolve(spec["opencode"])
+    except recipes.OpencodeError as exc:
+        raise InvalidSpec(str(exc)) from exc
+    request = {key: value for key, value in spec["opencode"].items() if value not in (None, "", {})}
+    request.update({"base": recipe["base"]["key"], "opencode_version": recipe["opencode"]["version"],
+                    "cpu": recipe["opencode"]["cpu"], "optional": recipe["optional"]})
+    spec["opencode"] = request
+    if spec.get("architecture") not in (None, "amd64"):
+        raise InvalidSpec("The opencode Shared Terminal is built for linux/amd64.")
     spec["architecture"] = "amd64"
     base = recipe["base"]
     if base["distribution"]:

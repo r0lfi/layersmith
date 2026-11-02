@@ -77,6 +77,13 @@ export default function Dashboard() {
               oc, kubectl, Helm, k9s, oc-mirror and OpenShift AI / GPU commands for Podman and Distrobox
             </div>
           </button>
+          <button className="tile" onClick={() => navigate("/projects/new?category=opencode")}>
+            <div className="tile-title">opencode Shared Terminal</div>
+            <div className="tile-sub">
+              The opencode coding agent for an air-gapped host: one always-running container, several users, each
+              just types opencode
+            </div>
+          </button>
           <button className="tile" onClick={() => navigate("/projects/new?category=llm-training")}>
             <div className="tile-title">LLM Training &amp; Fine-tuning</div>
             <div className="tile-sub">LoRA/QLoRA, full fine-tuning, LLaMA-Factory, data preparation</div>

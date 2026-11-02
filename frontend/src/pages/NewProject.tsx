@@ -6,6 +6,7 @@ import TrainingWizard from "./TrainingWizard";
 import GpuBenchmarkWizard from "./GpuBenchmarkWizard";
 import AiMlWizard from "./AiMlWizard";
 import OpenShiftWizard from "./OpenShiftWizard";
+import OpencodeWizard from "./OpencodeWizard";
 
 const STEPS = ["Purpose", "Base", "Version", "Tools", "Packages", "Files", "Scripts", "Image", "Review"] as const;
 
@@ -70,6 +71,8 @@ const CATEGORIES = [
     description: "NVIDIA PyTorch, CUDA, vLLM and TensorFlow images for Podman and Slurm, exported for air-gapped GPU clusters" },
   { id: "openshift", name: "OpenShift Admin Toolkit",
     description: "oc, kubectl, Helm, k9s, OpenShift AI and GPU tools in one rootless image for Podman and Distrobox" },
+  { id: "opencode", name: "opencode Shared Terminal",
+    description: "The opencode coding agent in one always-running container; users just type opencode on the host" },
   { id: "llm-training", name: "LLM Training & Fine-tuning",
     description: "Ready-to-run environments for fine-tuning and training language models" },
   { id: "gpu-benchmark", name: "NVIDIA GPU & LLM Benchmark",
@@ -78,7 +81,7 @@ const CATEGORIES = [
 
 export default function NewProject() {
   const [params, setParams] = useSearchParams();
-  const category = ["ai-ml", "openshift", "llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
+  const category = ["ai-ml", "openshift", "opencode", "llm-training", "gpu-benchmark"].includes(params.get("category") ?? "")
     ? params.get("category")! : "general";
   const setCategory = (id: string) =>
     setParams((current) => {
@@ -106,6 +109,8 @@ export default function NewProject() {
         <AiMlWizard onLeave={() => setCategory("general")} />
       ) : category === "openshift" ? (
         <OpenShiftWizard onLeave={() => setCategory("general")} />
+      ) : category === "opencode" ? (
+        <OpencodeWizard onLeave={() => setCategory("general")} />
       ) : category === "llm-training" ? (
         <TrainingWizard onLeave={() => setCategory("general")} />
       ) : category === "gpu-benchmark" ? (

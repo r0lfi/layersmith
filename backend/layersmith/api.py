@@ -65,6 +65,12 @@ from layersmith.openshift import checks as openshift_checks
 from layersmith.openshift import docs as openshift_docs
 from layersmith.openshift import recipes as openshift_recipes
 from layersmith.services.builds import openshift_recipe
+from layersmith.opencode import catalog as opencode_catalog
+from layersmith.opencode import checks as opencode_checks
+from layersmith.opencode import docs as opencode_docs
+from layersmith.opencode import recipes as opencode_recipes
+from layersmith.opencode import render as opencode_render
+from layersmith.services.builds import opencode_recipe
 
 router = APIRouter(prefix="/api")
 
@@ -77,7 +83,8 @@ LOG_CHUNK_MAX_BYTES = 1024 * 1024
 
 #: Optional API additions a client can check for instead of guessing from the
 #: version. Additive only: a client must keep working without any of them.
-API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit", "aiml", "openshift"]
+API_FEATURES = ["log-offset", "limits", "split-archive", "delete-build", "llm-models", "gpu-kit", "aiml", "openshift",
+                "opencode"]
 
 
 # ------------------------------------------------------------- schemas
@@ -132,6 +139,10 @@ class AimlResolveIn(BaseModel):
 
 class OpenShiftResolveIn(BaseModel):
     openshift: dict = Field(default_factory=dict)
+
+
+class OpencodeResolveIn(BaseModel):
+    opencode: dict = Field(default_factory=dict)
 
 
 class AimlLintIn(BaseModel):
@@ -208,6 +219,7 @@ def _build_json(build: Build, project: Project | None = None) -> dict:
         "training_profile": ((build.spec or {}).get("training") or {}).get("profile"),
         "aiml_template": ((build.spec or {}).get("aiml") or {}).get("template"),
         "openshift_ocp": ((build.spec or {}).get("openshift") or {}).get("ocp_version"),
+        "opencode_version": ((build.spec or {}).get("opencode") or {}).get("opencode_version"),
     }
 
 
@@ -335,6 +347,44 @@ def _openshift_detail(build: Build, backend: str = "podman") -> dict | None:
         "downloads": downloads,
     }
 
+
+def _opencode_detail(build: Build, backend: str = "podman") -> dict | None:
+    """Recipe, check results, installed versions, host commands and downloads of an opencode build."""
+    try:
+        recipe = opencode_recipe(build.spec)
+    except opencode_catalog.OpencodeError as exc:  # a saved request this version no longer offers
+        return {"error": str(exc)}
+    if recipe is None:
+        return None
+    image = build.image_ref or "IMAGE"
+    archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+    tests = opencode_checks.summarise(build.status, build.checks)
+    base = f"/api/builds/{build.id}"
+    downloads = []
+    if build.status == "ready" and _downloadable(build.export_path):
+        downloads = [
+            {"name": archive, "kind": "part", "size": build.export_size, "sha256": build.export_sha256,
+             "url": f"{base}/download/export"},
+            {"name": f"{archive}.sha256", "kind": "checksum", "url": f"{base}/download/export.sha256"},
+            {"name": opencode_docs.INSTALLER, "kind": "script", "url": f"{base}/opencode/files/{opencode_docs.INSTALLER}"},
+            {"name": "README.md", "kind": "script", "url": f"{base}/opencode/files/README.md"},
+        ]
+    return {
+        "recipe": recipe,
+        "tests": tests["rows"],
+        "tools_installed": tests["tools"],
+        "archive": archive,
+        "archive_format": ("OCI archive (podman save --format oci-archive)" if backend == "podman"
+                           else "Docker archive (docker save)"),
+        "commands": opencode_docs.commands(recipe, image, archive),
+        "site_config": (opencode_render.ASSET_DIR / "etc" / "opencode.json").read_text(encoding="utf-8"),
+        "downloads": downloads,
+    }
+
+
+OPENCODE_FILES = {"README.md": "text/markdown", opencode_docs.INSTALLER: "text/x-shellscript",
+                  "opencode.json": "application/json", "versions.json": "application/json",
+                  "checks.json": "application/json"}
 
 OPENSHIFT_FILES = {"README.md": "text/markdown", f"{openshift_docs.CONTAINER}.ini": "text/plain",
                    "versions.json": "application/json", "checks.json": "application/json"}
@@ -642,6 +692,11 @@ def get_project(project_id: str, state=Depends(get_state)):
                     data["openshift"] = openshift_recipes.resolve(project.spec["openshift"])
                 except openshift_catalog.OpenShiftError:
                     data["openshift"] = None
+            if project.spec.get("opencode"):
+                try:
+                    data["opencode"] = opencode_recipes.resolve(project.spec["opencode"])
+                except opencode_catalog.OpencodeError:
+                    data["opencode"] = None
             if project.spec.get("training"):
                 try:
                     data["training"] = training_recipes.resolve(project.spec["training"],
@@ -773,7 +828,8 @@ def get_build(build_id: str, state=Depends(get_state)):
                 "training": _training_detail(build, scanned=_has_completed_scan(session, build.id)),
                 "gpu_benchmark": _gpu_benchmark_detail(build, state["build_service"].backend.name),
                 "aiml": _aiml_detail(build, state["build_service"].backend.name),
-                "openshift": _openshift_detail(build, state["build_service"].backend.name)}
+                "openshift": _openshift_detail(build, state["build_service"].backend.name),
+                "opencode": _opencode_detail(build, state["build_service"].backend.name)}
 
 
 @router.get("/builds/{build_id}/log")
@@ -1126,6 +1182,69 @@ def openshift_file(build_id: str, name: str, state=Depends(get_state)):
         else:
             body = openshift_docs.distrobox_ini(recipe, image)
         return Response(body, media_type=OPENSHIFT_FILES[name],
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/opencode/catalog")
+def opencode_catalog_view():
+    """What the opencode wizard offers. Versions only; the pins stay on the server."""
+    return {"profile": opencode_catalog.PROFILE, "category": opencode_catalog.CATEGORY,
+            "bases": opencode_catalog.BASES, "default_base": opencode_catalog.DEFAULT_BASE,
+            "versions": list(opencode_catalog.OPENCODE_VERSIONS), "default_version": opencode_catalog.DEFAULT_OPENCODE,
+            "cpu_variants": opencode_catalog.CPU_VARIANTS, "default_cpu": opencode_catalog.DEFAULT_CPU,
+            "ripgrep": opencode_catalog.RIPGREP["version"],
+            "package_groups": {k: {key: v[key] for key in ("label", "purpose", "packages")}
+                               for k, v in opencode_catalog.PACKAGE_GROUPS.items()},
+            "optional": opencode_catalog.OPTIONAL, "default_optional": opencode_catalog.DEFAULT_OPTIONAL,
+            "environment": opencode_catalog.ENVIRONMENT, "host": opencode_catalog.HOST_DEFAULTS,
+            "tests": opencode_checks.TESTS, "sources": opencode_catalog.SOURCES,
+            "verified": opencode_catalog.VERIFIED}
+
+
+@router.post("/opencode/resolve")
+def opencode_resolve(payload: OpencodeResolveIn):
+    """Validate an opencode request. An invalid choice is an answer here, not an error."""
+    try:
+        recipe = opencode_recipes.resolve(payload.opencode)
+    except opencode_catalog.OpencodeError as exc:
+        return {"ok": False, "error": str(exc)}
+    names = opencode_recipes.default_names(recipe)
+    image = f"{names['repository']}:{names['tag']}"
+    return {"ok": True, "recipe": recipe, "names": names,
+            "commands": opencode_docs.commands(recipe, image, "opencode-1.0.0.tar")}
+
+
+@router.get("/builds/{build_id}/opencode/files/{name}")
+def opencode_file(build_id: str, name: str, state=Depends(get_state)):
+    if name not in OPENCODE_FILES:
+        raise HTTPException(404, "Unknown file")
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        try:
+            recipe = opencode_recipe(build.spec)
+        except opencode_catalog.OpencodeError as exc:
+            raise HTTPException(409, str(exc))
+        if recipe is None:
+            raise HTTPException(404, "Not an opencode Shared Terminal build")
+        image = build.image_ref or "IMAGE"
+        archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+        results = (build.checks or {}).get("results") or {}
+        if name == "README.md":
+            body = opencode_docs.markdown(recipe, image, archive)
+        elif name == opencode_docs.INSTALLER:
+            body = opencode_render.install_script(image, archive)
+        elif name == "opencode.json":
+            body = (opencode_render.ASSET_DIR / "etc" / "opencode.json").read_text(encoding="utf-8")
+        elif name == "versions.json":
+            tools = ((results.get("user") or {}).get("info") or {}).get("tools")
+            if not tools:
+                raise HTTPException(404, "No versions recorded: the user check did not run for this build")
+            body = json.dumps(tools, indent=2) + "\n"
+        else:
+            body = json.dumps(results, indent=2) + "\n"
+        return Response(body, media_type=OPENCODE_FILES[name],
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 

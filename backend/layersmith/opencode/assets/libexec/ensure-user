@@ -1,0 +1,77 @@
+#!/bin/bash
+# Make a host user known inside the shared opencode container, so `podman exec
+# --user UID` runs with the right name, home and supplementary groups.
+#
+#   ensure-user NAME UID GID HOME [GID:GROUP ...]
+#
+# Runs as root inside the container, called by the host's opencode-enter with
+# values it read from the host's own user database (never from the user).
+# Idempotent: the user's entry and group memberships are brought in line with
+# the host on every call, so a group removed on the host is removed here too.
+set -euo pipefail
+
+die() { echo "ensure-user: $*" >&2; exit 1; }
+[[ $(id -u) == 0 ]] || die "must run as root"
+(( $# >= 4 )) || die "usage: ensure-user NAME UID GID HOME [GID:GROUP ...]"
+
+name=$1 uid=$2 gid=$3 home=$4
+shift 4
+name_re='^[A-Za-z_][A-Za-z0-9._-]{0,63}$'
+[[ $uid =~ ^[0-9]+$ && $uid -gt 0 ]] || die "invalid uid: $uid"
+[[ $gid =~ ^[0-9]+$ ]] || die "invalid gid: $gid"
+[[ $home == /* && $home != *:* && $home != *$'\n'* ]] || die "invalid home: $home"
+# Directory-service names (user@domain, spaces) cannot be written to /etc/passwd as they are.
+[[ $name =~ $name_re ]] || name="u$uid"
+
+declare -A want=()  # gid -> group name
+want[$gid]=""
+for entry in "$@"; do
+  g=${entry%%:*} n=${entry#*:}
+  [[ $g =~ ^[0-9]+$ ]] || die "invalid group: $entry"
+  [[ $n =~ $name_re ]] || n="g$g"
+  want[$g]=$n
+done
+
+exec 9>/run/opencode-ensure-user.lock
+flock 9
+
+# ---- passwd: the uid decides; a different name already using it keeps it.
+existing=$(awk -F: -v u="$uid" '$3 == u { print $1; exit }' /etc/passwd)
+if [[ -n $existing ]]; then
+  name=$existing
+  awk -F: -v OFS=: -v u="$uid" -v g="$gid" -v h="$home" \
+    '$3 == u { $4 = g; $6 = h } { print }' /etc/passwd >/etc/passwd.opencode-new
+  mv -f /etc/passwd.opencode-new /etc/passwd
+else
+  # The name is taken by another uid (an image account): fall back to a unique one.
+  if awk -F: -v n="$name" '$1 == n { found = 1 } END { exit !found }' /etc/passwd; then
+    name="u$uid"
+  fi
+  printf '%s:x:%s:%s:opencode user:%s:/bin/bash\n' "$name" "$uid" "$gid" "$home" >>/etc/passwd
+fi
+
+# ---- group: create missing groups, then make the member lists match the host.
+for g in "${!want[@]}"; do
+  if ! awk -F: -v g="$g" '$3 == g { found = 1 } END { exit !found }' /etc/group; then
+    n=${want[$g]:-$name}
+    if awk -F: -v n="$n" '$1 == n { found = 1 } END { exit !found }' /etc/group; then
+      n="g$g"
+    fi
+    printf '%s:x:%s:\n' "$n" "$g" >>/etc/group
+  fi
+done
+supplementary=" "
+for g in "${!want[@]}"; do
+  [[ $g == "$gid" ]] || supplementary+="$g "
+done
+awk -F: -v OFS=: -v user="$name" -v keep="$supplementary" '
+  {
+    n = split($4, members, ",")
+    out = ""
+    for (i = 1; i <= n; i++) if (members[i] != "" && members[i] != user) out = out (out == "" ? "" : ",") members[i]
+    if (index(keep, " " $3 " ")) out = out (out == "" ? "" : ",") user
+    $4 = out
+    print
+  }' /etc/group >/etc/group.opencode-new
+mv -f /etc/group.opencode-new /etc/group
+echo "$name"

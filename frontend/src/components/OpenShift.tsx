@@ -5,7 +5,7 @@ import { DownloadAllButton } from "./DownloadAll";
 
 const STATUS_ICON: Record<string, string> = { passed: "✓", failed: "✕", not_run: "–" };
 
-function CheckRows({ rows }: { rows: OpenShiftTestRow[] }) {
+export function CheckRows({ rows }: { rows: OpenShiftTestRow[] }) {
   return (
     <div className="checks">
       {rows.map((row) => (

@@ -67,7 +67,14 @@ def generate(project, spec, base_digest=None, image_ref=None):
     gpu_render = None
     aiml_recipe = None
     os_recipe = None
-    if spec.get("openshift"):
+    oc_recipe = None
+    if spec.get("opencode"):
+        from layersmith.opencode import recipes as oc_recipes, render as oc_render
+
+        oc_recipe = oc_recipes.resolve(spec["opencode"])
+        packages, warnings = resolve_packages({**spec, "packages": oc_recipe["packages"], "presets": []})
+        warnings = [*oc_recipe["warnings"], *warnings]
+    elif spec.get("openshift"):
         from layersmith.openshift import recipes as os_recipes, render as os_render
 
         os_recipe = os_recipes.resolve(spec["openshift"])
@@ -124,6 +131,8 @@ def generate(project, spec, base_digest=None, image_ref=None):
         labels.update(aiml_render.labels(aiml_recipe))
     if os_recipe:
         labels.update(os_render.labels(os_recipe))
+    if oc_recipe:
+        labels.update(oc_render.labels(oc_recipe))
     lines.append("LABEL " + " \\\n      ".join(f"{k}={_quote(v)}" for k, v in labels.items()))
 
     if scripts.get("pre_build"):
@@ -134,6 +143,8 @@ def generate(project, spec, base_digest=None, image_ref=None):
         lines += ["", *gpu_render.apt_mirror_prelude(gpu_recipe)]
     if os_recipe:
         lines += os_render.prelude_lines(os_recipe)
+    if oc_recipe:
+        lines += oc_render.prelude_lines(oc_recipe)
 
     install = _install(family, packages, epel=bool(spec.get("enable_epel")) and el)
     if install:
@@ -146,6 +157,8 @@ def generate(project, spec, base_digest=None, image_ref=None):
         lines += aiml_render.install_lines(aiml_recipe, image_ref)
     if os_recipe:
         lines += os_render.install_lines(os_recipe)
+    if oc_recipe:
+        lines += oc_render.install_lines(oc_recipe)
 
     for tool in spec.get("tools") or []:
         lines.append(f"COPY --chmod={tool['mode']} tools/{tool['sha256']} {tool['install_path']}")

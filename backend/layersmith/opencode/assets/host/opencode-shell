@@ -1,0 +1,4 @@
+#!/bin/sh
+# A shell in the shared opencode container, as you, in this directory: the
+# same environment opencode's agent runs its commands in.
+exec /usr/local/bin/opencode --opencode-shell

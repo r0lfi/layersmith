@@ -1,0 +1,66 @@
+#!/bin/bash
+# Start opencode (or a shell) in the shared opencode container as the user who
+# ran `opencode`, in the directory they are in. Installed on the host by
+# install-host.sh and run through sudo by /usr/local/bin/opencode; it trusts
+# nothing from the caller but SUDO_UID (set by sudo) and the current directory.
+#
+#   opencode-enter [OPENCODE ARGS...]
+#   opencode-enter --opencode-shell        a login shell instead (what the agent sees)
+set -euo pipefail
+
+CONF=/etc/opencode-container/container.conf
+die() { echo "opencode: $*" >&2; exit 1; }
+
+[[ $(id -u) == 0 ]] || die "start this with the opencode command (it runs through sudo)"
+uid=${SUDO_UID:-}
+[[ $uid =~ ^[0-9]+$ ]] || die "start this with the opencode command, not directly"
+[[ $uid != 0 ]] || die "run opencode as your own user, not as root"
+[[ -r $CONF ]] || die "$CONF is missing; run install-host.sh"
+RUNTIME=podman NAME=opencode MOUNTS=/home
+# shellcheck source=/dev/null
+. "$CONF"
+
+mode=opencode
+if [[ ${1:-} == --opencode-shell ]]; then
+  mode=shell
+  shift
+fi
+
+entry=$(getent passwd "$uid") || die "uid $uid is not a user on this host"
+IFS=: read -r user _ _ gid _ home _ <<<"$entry"
+groups=()
+for g in $(id -G "$uid"); do
+  groups+=("$g:$(getent group "$g" | cut -d: -f1)")
+done
+
+shared() {  # shared PATH: is PATH inside one of the mounted directories?
+  local m
+  for m in $MOUNTS; do
+    [[ $1 == "$m" || $1 == "$m"/* ]] && return 0
+  done
+  return 1
+}
+shared "$home" || die "your home ($home) is not shared with the opencode container (MOUNTS=\"$MOUNTS\" in $CONF)"
+cwd=$(pwd -P 2>/dev/null || echo "$home")
+if ! shared "$cwd"; then
+  echo "opencode: $cwd is not shared with the opencode container; starting in $home instead" >&2
+  cwd=$home
+fi
+
+running=$("$RUNTIME" container inspect --format '{{.State.Running}}' "$NAME" 2>/dev/null || true)
+[[ $running == true ]] || die "the opencode container is not running (ask an administrator: systemctl status opencode-container)"
+
+"$RUNTIME" exec --user 0 "$NAME" /usr/local/libexec/opencode/ensure-user \
+  "$user" "$uid" "$gid" "$home" "${groups[@]}" >/dev/null || die "could not set up your user in the container"
+
+flags=(-i)
+[[ -t 0 && -t 1 ]] && flags+=(-t)
+env=(-e "HOME=$home" -e "USER=$user" -e "LOGNAME=$user" -e "TERM=${TERM:-xterm-256color}")
+for var in COLORTERM LANG LC_ALL; do
+  [[ -n ${!var:-} ]] && env+=(-e "$var=${!var}")
+done
+
+if [[ $mode == shell ]]; then
+  exec "$RUNTIME" exec "${flags[@]}" --user "$uid" --workdir "$cwd" "${env[@]}" "$NAME" /bin/bash -l
+fi
+exec "$RUNTIME" exec "${flags[@]}" --user "$uid" --workdir "$cwd" "${env[@]}" "$NAME" opencode "$@"
