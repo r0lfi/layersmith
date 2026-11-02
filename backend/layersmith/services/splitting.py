@@ -85,7 +85,11 @@ def _file_identity(path: Path) -> dict:
 
 
 def current_manifest(build: Build) -> dict | None:
-    """The stored manifest, if it still describes the archive on disk."""
+    """The stored manifest, if it still describes the archive on disk.
+
+    It also says what the assemble script can install on the receiving host,
+    taken from the build itself so an archive split earlier gets it too.
+    """
     manifest = build.export_parts
     if not manifest or not build.export_path:
         return None
@@ -98,7 +102,17 @@ def current_manifest(build: Build) -> dict | None:
             or manifest.get("archive_size") != identity["size"]
             or manifest.get("archive_mtime_ns") != identity["mtime_ns"]):
         return None
-    return manifest
+    return {**manifest, "host_install": _host_install(build)}
+
+
+def _host_install(build: Build) -> str | None:
+    """"openshift-admin" for an OpenShift Admin Toolkit build: --install sets up its command."""
+    from layersmith.services.builds import openshift_recipe
+
+    try:
+        return "openshift-admin" if openshift_recipe(build.spec) else None
+    except Exception:  # a saved request this LayerSmith no longer offers: restore and load still work
+        return None
 
 
 def downloads(manifest: dict) -> list[dict]:
@@ -297,17 +311,17 @@ SCRIPT = r"""#!/usr/bin/env bash
 #   chmod +x assemble-image.sh
 #   ./assemble-image.sh            restore and verify
 #   ./assemble-image.sh --load     ... then podman load -i (docker if no podman)
-#
+@@INSTALL_USAGE@@#
 # Options:
 #   --load          load the restored archive with podman (or docker)
-#   --remove-parts  delete the parts once the archive is restored and verified
+@@INSTALL_OPTION@@#   --remove-parts  delete the parts once the archive is restored and verified
 #   --force         replace an existing archive that does not match
 #   --dir DIR       where the parts are and the archive is written
 #                   (default: the directory this script is in)
 #   -h, --help      this text
 #
 # Exit codes: 0 ok, 1 usage, 2 missing part, 3 corrupt part, 4 not enough
-# space or write error, 5 existing archive differs, 6 load failed.
+# space or write error, 5 existing archive differs, 6 load failed@@INSTALL_EXIT@@.
 
 set -u -o pipefail
 
@@ -325,12 +339,12 @@ PART_SHA256=(
 @@PART_SHA256@@
 )
 
-load=0 remove_parts=0 force=0
+load=0 remove_parts=0 force=0 install=0
 dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 while [ $# -gt 0 ]; do
   case "$1" in
     --load) load=1 ;;
-    --remove-parts) remove_parts=1 ;;
+@@INSTALL_CASE@@    --remove-parts) remove_parts=1 ;;
     --force) force=1 ;;
     --dir) [ $# -ge 2 ] || { echo "--dir needs a directory" >&2; exit 1; }; dir=$2; shift ;;
     -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -455,12 +469,40 @@ if [ "$load" = 1 ]; then
   echo "+ $runtime load -i $ARCHIVE"
   "$runtime" load -i "$ARCHIVE" || { echo "$runtime load failed" >&2; exit 6; }
 fi
-"""
+@@INSTALL_RUN@@"""
+
+
+#: What `--install` adds for an OpenShift Admin Toolkit archive. The installer
+#: is embedded whole, so the parts and this one script are all a host needs.
+OPENSHIFT_INSTALL = {
+    "@@INSTALL_USAGE@@": "#   ./assemble-image.sh --install  ... load, then the openshift-admin command (a shell in an\n"
+                         "#                                  always-running container); the same again for a new version\n",
+    "@@INSTALL_OPTION@@": "#   --install       --load, then install openshift-admin for this user (rootless, no sudo)\n",
+    "@@INSTALL_CASE@@": "    --install) load=1 install=1 ;;\n",
+    "@@INSTALL_EXIT@@": ", 7 install failed",
+}
+
+
+def _install_run(image: str) -> str:
+    from layersmith.openshift import host
+
+    return ("\nif [ \"$install\" = 1 ]; then\n"
+            "  [ \"$runtime\" = podman ] || { echo \"--install needs podman\" >&2; exit 7; }\n"
+            "  IFS= read -r -d '' INSTALLER <<'LAYERSMITH_INSTALL_HOST' || true\n"
+            f"{host.installer(image)}"
+            "LAYERSMITH_INSTALL_HOST\n"
+            "  echo\n"
+            "  bash -c \"$INSTALLER\" install-host.sh --image \"$IMAGE\" || exit 7\n"
+            "elif [ \"$load\" = 1 ]; then\n"
+            "  echo\n"
+            "  echo \"Next: ./assemble-image.sh --install sets up the openshift-admin command (a shell in the container).\"\n"
+            "fi\n")
 
 
 def assemble_script(manifest: dict) -> str:
     image = manifest.get("image_ref") or ""
     quote = shlex.quote
+    openshift = manifest.get("host_install") == "openshift-admin" and bool(image)
     values = {
         "@@VERSION@@": config.VERSION,
         "@@ARCHIVE@@": manifest["archive"],
@@ -472,6 +514,8 @@ def assemble_script(manifest: dict) -> str:
         "@@PART_NAMES@@": "\n".join(f"  {quote(part['name'])}" for part in manifest["parts"]),
         "@@PART_SIZES@@": "\n".join(f"  {int(part['size'])}" for part in manifest["parts"]),
         "@@PART_SHA256@@": "\n".join(f"  {quote(part['sha256'])}" for part in manifest["parts"]),
+        **(OPENSHIFT_INSTALL if openshift else dict.fromkeys(OPENSHIFT_INSTALL, "")),
+        "@@INSTALL_RUN@@": _install_run(image) if openshift else "",
     }
     text = SCRIPT
     for key, value in values.items():

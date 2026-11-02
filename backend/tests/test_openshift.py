@@ -504,7 +504,7 @@ def test_build_runs_both_checks_and_shows_versions_and_commands(os_client):
     assert shift["commands"]["tag"] == "podman tag localhost/openshift-admin:1.0.0 localhost/openshift-admin:4.22"
     assert shift["commands"]["distrobox_enter"] == "distrobox enter openshift-admin"
     assert {f["name"] for f in shift["downloads"]} == {"openshift-admin-1.0.0.tar", "openshift-admin-1.0.0.tar.sha256",
-                                                       "openshift-admin.ini", "README.md"}
+                                                       "install-host.sh", "openshift-admin.ini", "README.md"}
     assert detail["manifest"]["openshift"]["ocp"] == "4.22.18"
     assert detail["manifest"]["openshift"]["checks"] == {"image": "passed", "user": "passed"}
     project_view = os_client.get(f"/api/projects/{project['id']}").json()
@@ -535,7 +535,8 @@ def test_airgap_bundle_carries_readme_manifest_and_checks(os_client):
         names = archive.getnames()
         stem = names[0].split("/")[0]
         assert {f"{stem}/openshift/README.md", f"{stem}/openshift/openshift-admin.ini",
-                f"{stem}/openshift/checks.json"} <= set(names)
+                f"{stem}/openshift/checks.json", f"{stem}/openshift/install-host.sh"} <= set(names)
+        assert archive.getmember(f"{stem}/openshift/install-host.sh").mode & 0o111
         install = archive.extractfile(f"{stem}/INSTALL.txt").read().decode()
         sums = archive.extractfile(f"{stem}/SHA256SUMS").read().decode()
     assert "openshift/README.md" in install and "openshift/openshift-admin.ini" in sums

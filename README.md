@@ -124,7 +124,9 @@ and shows you the Containerfile it produced before anything is built.
   kubectx/kubens, yq, podman/buildah/skopeo and ansible-core, every download
   pinned by sha256. Adds `oc-status`, `oc-gpu`, `oc-ai` and other helpers for
   OpenShift AI and NVIDIA GPU clusters, multi-cluster kubeconfigs with a
-  production marker, and a Distrobox Assemble manifest. Checks after each build
+  production marker, an `openshift-admin` command that enters an always-running
+  rootless container (installed by `install-host.sh` or
+  `assemble-image.sh --install`), and a Distrobox Assemble manifest. Checks after each build
   prove the tools and versions as a non-root user and that no kubeconfig or
   credential is in any layer. See [docs/openshift-admin.md](docs/openshift-admin.md).
 - **opencode Shared Terminal** — the opencode coding agent for an air-gapped

@@ -1,0 +1,108 @@
+#!/bin/bash
+# openshift-admin - a shell, or one command, in your OpenShift Admin Toolkit container.
+#
+#   openshift-admin                     login shell in the container (oc, kubectl, helm, k9s, oc-*)
+#   openshift-admin oc get nodes        run one command there and return
+#   openshift-admin oc apply -f - < app.yaml    a host file goes in on stdin
+#   openshift-admin --status            container state and the image it runs
+#   openshift-admin --restart           recreate the container (after installing a new image)
+#   openshift-admin --stop              stop it (the next openshift-admin starts it again)
+#
+# The container is rootless and yours alone: it runs as you (--userns=keep-id),
+# sees only ~/.kube from the host (kubeconfigs, oc login tokens) and keeps its
+# home (shell history, helm caches) in the volume openshift-admin-home. It runs
+# the image tagged localhost/openshift-admin:current; install-host.sh moves that
+# tag when you install a new version. Settings for the container, one VAR=value
+# per line (HTTPS_PROXY, NO_PROXY, OPENSHIFT_ADMIN_PROD_PATTERN=prod|prd ...),
+# go in ~/.config/openshift-admin/env and apply after --restart.
+#
+# openshift_admin is the same command. Installed by install-host.sh (LayerSmith).
+set -euo pipefail
+
+NAME=${OPENSHIFT_ADMIN_CONTAINER:-openshift-admin}
+IMAGE=${OPENSHIFT_ADMIN_IMAGE:-localhost/openshift-admin:current}
+VOLUME=${OPENSHIFT_ADMIN_VOLUME:-openshift-admin-home}
+UNIT=$NAME.service
+ENV_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/openshift-admin/env
+SELF=$(basename "$0")
+
+die() { echo "$SELF: $*" >&2; exit 1; }
+usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit "${1:-0}"; }
+
+command -v podman >/dev/null 2>&1 || die "podman is not installed"
+[[ $(id -u) != 0 ]] || die "run this as your own user; the container is rootless"
+
+# One definition of the container, used by the systemd user service and without it.
+run_args() {
+  mkdir -p "$HOME/.kube" && chmod 700 "$HOME/.kube"
+  RUN=(--name "$NAME" --hostname "$NAME" --init --userns=keep-id
+       --label io.layersmith.openshift.host=openshift-admin
+       -v "$VOLUME:/home/admin:U" -v "$HOME/.kube:/home/admin/.kube:z"
+       -e HOME=/home/admin -w /home/admin)
+  [[ -r $ENV_FILE ]] && RUN+=(--env-file "$ENV_FILE")
+  return 0
+}
+
+state() { podman container inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo absent; }
+running() { [[ $(state) == running ]]; }
+service() {  # Is the systemd user service installed and is a user manager reachable?
+  [[ -f ${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$UNIT ]] && systemctl --user show-environment >/dev/null 2>&1
+}
+image_ok() {
+  podman image exists "$IMAGE" || die "image $IMAGE is not loaded; run ./assemble-image.sh --install (or install-host.sh --archive FILE)"
+}
+
+start() {
+  running && return 0
+  image_ok
+  if service; then
+    systemctl --user start "$UNIT"
+  else
+    run_args
+    podman run -d --replace "${RUN[@]}" "$IMAGE" sleep infinity >/dev/null
+  fi
+  local _
+  for _ in $(seq 1 100); do
+    running && return 0
+    sleep 0.1
+  done
+  die "the container did not start; see: podman logs $NAME${UNIT:+ / journalctl --user -u $UNIT}"
+}
+
+stop() {
+  if service; then systemctl --user stop "$UNIT"; fi
+  podman rm -f -t 5 "$NAME" >/dev/null 2>&1 || true
+}
+
+case ${1:-} in
+  --serve)  # the systemd user service's ExecStart: the container in the foreground
+    image_ok
+    run_args
+    exec podman run --rm --replace "${RUN[@]}" "$IMAGE" sleep infinity ;;
+  --status)
+    echo "container: $NAME ($(state))"
+    podman container inspect --format 'image:     {{.ImageName}} {{.Image}}' "$NAME" 2>/dev/null || true
+    echo "tag:       $IMAGE $(podman image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo '(not loaded)')"
+    if service; then
+      echo "service:   $UNIT $(systemctl --user is-active "$UNIT" 2>/dev/null || true), $(systemctl --user is-enabled "$UNIT" 2>/dev/null || true)"
+    else
+      echo "service:   none (the container starts when you run $SELF)"
+    fi
+    exit 0 ;;
+  --restart) stop; start; echo "$NAME restarted on $IMAGE"; exit 0 ;;
+  --stop) stop; echo "$NAME stopped"; exit 0 ;;
+  -h | --help) usage 0 ;;
+  --) shift ;;
+  -*) echo "$SELF: unknown option $1" >&2; usage 64 ;;
+esac
+
+start
+flags=(-i)
+[[ -t 0 && -t 1 ]] && flags+=(-t)
+env=(-e "TERM=${TERM:-xterm-256color}")
+[[ -n ${COLORTERM:-} ]] && env+=(-e "COLORTERM=$COLORTERM")
+if (($#)); then
+  # Through a login shell, so KUBECONFIG, completion and the helpers are set up as in the shell.
+  exec podman exec "${flags[@]}" "${env[@]}" "$NAME" /bin/bash -lc '"$@"' "$SELF" "$@"
+fi
+exec podman exec "${flags[@]}" "${env[@]}" "$NAME" /bin/bash -l

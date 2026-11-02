@@ -692,14 +692,17 @@ class BuildService:
         return {"results": results}
 
     def _openshift_bundle(self, build: Build, recipe: dict, staging: Path, archive: str) -> None:
-        """openshift/: README, Distrobox Assemble manifest, installed versions and check results."""
-        from layersmith.openshift import docs
+        """openshift/: README, install-host.sh, Distrobox Assemble manifest and check results."""
+        from layersmith.openshift import docs, host
 
         target = staging / "openshift"
         target.mkdir()
         image = build.image_ref or "IMAGE"
         (target / "README.md").write_text(docs.markdown(recipe, image, archive), encoding="utf-8")
         (target / f"{docs.CONTAINER}.ini").write_text(docs.distrobox_ini(recipe, image), encoding="utf-8")
+        installer = target / host.INSTALLER
+        installer.write_text(host.installer(image, archive), encoding="utf-8")
+        installer.chmod(0o755)
         (target / "checks.json").write_text(json.dumps((build.checks or {}).get("results") or {}, indent=2) + "\n",
                                             encoding="utf-8")
 
@@ -847,7 +850,8 @@ class BuildService:
                                     + ("  aiml/README.md          Load, run and test on the GPU host; Slurm\n"
                                        "  aiml/sbom.cdx.json       CycloneDX SBOM; packages.json, requirements.lock\n"
                                        if aiml_recipe(build.spec) else "")
-                                    + ("  openshift/README.md     Distrobox and Podman, clusters, commands, versions\n"
+                                    + ("  openshift/README.md     The openshift-admin command, Distrobox, clusters, versions\n"
+                                       "  openshift/install-host.sh  bash openshift/install-host.sh --archive image/...\n"
                                        "  openshift/openshift-admin.ini  distrobox assemble create --file ...\n"
                                        if openshift_recipe(build.spec) else "")
                                     + ("  opencode/README.md      Install on the host, LLM endpoint, users, operation\n"

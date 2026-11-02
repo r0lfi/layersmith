@@ -64,6 +64,7 @@ from layersmith.services.builds import aiml_recipe
 from layersmith.openshift import catalog as openshift_catalog
 from layersmith.openshift import checks as openshift_checks
 from layersmith.openshift import docs as openshift_docs
+from layersmith.openshift import host as openshift_host
 from layersmith.openshift import recipes as openshift_recipes
 from layersmith.services.builds import openshift_recipe
 from layersmith.opencode import catalog as opencode_catalog
@@ -334,6 +335,8 @@ def _openshift_detail(build: Build, backend: str = "podman") -> dict | None:
             {"name": archive, "kind": "part", "size": build.export_size, "sha256": build.export_sha256,
              "url": f"{base}/download/export"},
             {"name": f"{archive}.sha256", "kind": "checksum", "url": f"{base}/download/export.sha256"},
+            {"name": openshift_host.INSTALLER, "kind": "script",
+             "url": f"{base}/openshift/files/{openshift_host.INSTALLER}"},
             {"name": f"{openshift_docs.CONTAINER}.ini", "kind": "script",
              "url": f"{base}/openshift/files/{openshift_docs.CONTAINER}.ini"},
             {"name": "README.md", "kind": "script", "url": f"{base}/openshift/files/README.md"},
@@ -390,6 +393,7 @@ OPENCODE_FILES = {"README.md": "text/markdown", opencode_docs.INSTALLER: "text/x
                   "checks.json": "application/json"}
 
 OPENSHIFT_FILES = {"README.md": "text/markdown", f"{openshift_docs.CONTAINER}.ini": "text/plain",
+                   openshift_host.INSTALLER: "text/x-shellscript",
                    "versions.json": "application/json", "checks.json": "application/json"}
 
 
@@ -1182,6 +1186,9 @@ def openshift_file(build_id: str, name: str, state=Depends(get_state)):
             body = json.dumps(tools, indent=2) + "\n"
         elif name == "checks.json":
             body = json.dumps(results, indent=2) + "\n"
+        elif name == openshift_host.INSTALLER:
+            archive = Path(build.export_path).name if build.export_path else _aiml_archive_name(build)
+            body = openshift_host.installer(image, archive)
         else:
             body = openshift_docs.distrobox_ini(recipe, image)
         return Response(body, media_type=OPENSHIFT_FILES[name],

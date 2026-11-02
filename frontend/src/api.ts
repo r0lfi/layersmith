@@ -780,6 +780,10 @@ export interface OpenShiftCommands {
   distrobox_assemble: string;
   distrobox_remove: string;
   podman_run: string;
+  install: string;
+  assemble_install: string;
+  enter: string;
+  run_one: string;
   versions: string;
   image: string;
   alias: string;

@@ -61,6 +61,7 @@ checksum is written into it, so it does not depend on the `.sha256` files.
 | Option | Effect |
 | --- | --- |
 | `--load` | after restoring, run `podman load -i` (or `docker load -i` when there is no podman) |
+| `--install` | OpenShift Admin Toolkit archives only: `--load`, then install the `openshift-admin` command and its systemd user service for the user running the script (see [openshift-admin.md](openshift-admin.md)); run it again for a new version |
 | `--remove-parts` | delete the parts once the archive is restored and verified |
 | `--force` | replace an existing archive of the same name that does not match |
 | `--dir DIR` | where the parts are and the archive goes (default: the script's directory) |
@@ -74,7 +75,7 @@ Running it again after success verifies the existing archive and stops.
 
 Exit codes: `0` ok, `1` usage, `2` missing or incomplete part, `3` corrupt
 part or mismatch, `4` not enough space or a write error, `5` an existing
-archive differs, `6` `--load` failed.
+archive differs, `6` `--load` failed, `7` `--install` failed.
 
 Without the script, the same thing by hand:
 

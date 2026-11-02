@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenShift Admin Toolkit container (enter it with openshift-admin)
+
+[Service]
+ExecStart=%h/.local/bin/openshift-admin --serve
+# podman run passes SIGTERM on to the container; anything left is killed after the timeout.
+KillMode=mixed
+TimeoutStopSec=20
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

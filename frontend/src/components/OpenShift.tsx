@@ -103,13 +103,27 @@ export function OpenShiftPanel({ build }: { build: Build }) {
         )}
       </Card></div>
 
+      <div style={{ marginTop: "1rem" }}><Card title="Always running: the openshift-admin command">
+        {ready && detail.downloads.length > 0 && (
+          <div style={{ marginBottom: "0.8rem" }}>
+            <DownloadAllButton files={detail.downloads} nextStep={c.install} host="workstation" />
+          </div>
+        )}
+        <p className="faint" style={{ marginTop: 0 }}>
+          One command, as your own user (no sudo): loads the image, installs <span className="mono">openshift-admin</span>{" "}
+          and a systemd user service that keeps the container running. A split download does the same
+          with <span className="mono">{c.assemble_install}</span>.
+        </p>
+        <CodeBlock code={`${c.install}\n\n${c.enter}                     # a shell: oc login, oc get nodes, k9s ...\n${c.run_one}`} />
+        <p className="faint">
+          A new version: run the same with the new archive; the container is recreated on it and{" "}
+          <span className="mono">~/.kube</span> and its home are kept.{" "}
+          <a href={api.openshiftFileUrl(build.id, "install-host.sh")}>install-host.sh</a>
+        </p>
+      </Card></div>
+
       <div className="grid two" style={{ marginTop: "1rem" }}>
-        <Card title="Load and start with Distrobox">
-          {ready && detail.downloads.length > 0 && (
-            <div style={{ marginBottom: "0.8rem" }}>
-              <DownloadAllButton files={detail.downloads} nextStep={c.distrobox_assemble} host="workstation" />
-            </div>
-          )}
+        <Card title="Or with Distrobox">
           <CodeBlock code={`${c.verify}\n${c.load}\n${c.tag}\n\n${c.distrobox_create}\n${c.distrobox_enter}`} />
           <p className="faint">
             Or in one step with the Assemble manifest (<a href={api.openshiftFileUrl(build.id, "openshift-admin.ini")}>openshift-admin.ini</a>):

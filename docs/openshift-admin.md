@@ -134,6 +134,50 @@ a scanner is configured (see [scanning.md](scanning.md)).
 
 ## Using it
 
+### The openshift-admin command (recommended)
+
+`install-host.sh` from the build page (also `openshift/install-host.sh` in the
+air-gap bundle) loads the image and gives your user a container that is always
+running, entered by typing `openshift-admin` (`openshift_admin` works too):
+
+```bash
+sha256sum -c openshift-admin-1.0.0.tar.sha256
+bash install-host.sh --archive openshift-admin-1.0.0.tar
+
+openshift-admin                         # login shell: oc login ..., oc get nodes, k9s, oc-status
+openshift-admin oc get co               # one command, then back on the host
+openshift-admin oc apply -f - < app.yaml
+openshift-admin --status                # container, image, service
+```
+
+With a [split download](split-archive.md), `./assemble-image.sh --install`
+restores, verifies, loads and installs in one step.
+
+What it sets up, all rootless and for your user only (no sudo):
+
+| Path | What |
+|---|---|
+| `~/.local/bin/openshift-admin`, `openshift_admin` | the command |
+| `~/.config/systemd/user/openshift-admin.service` | runs the container (`openshift-admin --serve`), restarts it if it stops |
+| `localhost/openshift-admin:current` | the tag the container runs |
+| volume `openshift-admin-home` | the container's `/home/admin`: shell history, helm and oc caches |
+| `~/.kube` | mounted at `/home/admin/.kube`: kubeconfigs and `oc login` tokens stay on the host |
+| `~/.config/openshift-admin/env` | optional `VAR=value` lines for the container (`HTTPS_PROXY`, `NO_PROXY`, `OPENSHIFT_ADMIN_PROD_PATTERN`) |
+
+The container runs as you (`--userns=keep-id`) with its own network namespace and
+no other host directory. The installer turns on lingering
+(`loginctl enable-linger`) when it is allowed, so the container keeps running
+after logout and starts at boot; otherwise it runs while you are logged in. Without a
+systemd user session (`su`, `sudo -u`) no service is installed and
+`openshift-admin` starts the container itself when it is not running.
+
+A new version: run the same command with the new archive. The tag moves, the
+container is recreated on the new image, and `~/.kube` and the home volume are
+kept. Old images stay loaded until you `podman rmi` them.
+`bash install-host.sh --uninstall` removes the command and the service.
+
+### Distrobox
+
 ```bash
 sha256sum -c openshift-admin-1.0.0.tar.sha256
 podman load -i openshift-admin-1.0.0.tar
@@ -203,6 +247,8 @@ alternative is `host-podman build ...`, which runs the host's Podman through
 ## Updating
 
 Build a new version of the project in LayerSmith: the base is pulled and pinned
-by digest again and every package is updated. Load the new archive, tag it as
+by digest again and every package is updated. With the `openshift-admin`
+command, `bash install-host.sh --archive <new archive>` (or
+`./assemble-image.sh --install`) is all. With Distrobox: load the new archive, tag it as
 `localhost/openshift-admin:4.22`, then `distrobox rm --force openshift-admin`
 and create it again. Your home and kubeconfigs are not touched.

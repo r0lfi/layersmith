@@ -5,7 +5,7 @@ the air-gap bundle and the build page, so what a user reads offline matches
 what LayerSmith showed.
 """
 
-from layersmith.openshift import catalog
+from layersmith.openshift import catalog, host
 
 CONTAINER = "openshift-admin"
 
@@ -34,6 +34,10 @@ def commands(recipe: dict, image_ref: str, archive: str) -> dict:
         "podman_run": (f"podman run --rm -it --name {CONTAINER} --userns=keep-id \\\n"
                        f"  --tmpfs /home/admin:rw,mode=1777 -v \"$HOME/.kube:/home/admin/.kube:z\" \\\n"
                        f"  -e HOME=/home/admin -w /home/admin {friendly}"),
+        "install": f"bash install-host.sh --archive {archive}",
+        "assemble_install": "./assemble-image.sh --install",
+        "enter": "openshift-admin",
+        "run_one": "openshift-admin oc get nodes",
         "versions": "openshift-admin-versions",
         "image": image_ref,
         "alias": friendly,
@@ -94,7 +98,36 @@ OpenShift clients {recipe['ocp']['version']} (Kubernetes {recipe['ocp']['kuberne
 time zone {recipe['timezone']}, locale {recipe['locale']}.
 Built by LayerSmith with profile {recipe['profile']} v{recipe['profile_version']}; downloads verified {recipe['verified']}.
 
-## Start
+## Start: the openshift-admin command
+
+One command sets up a container that is always running, rootless and as you,
+and that you enter by typing `openshift-admin` (or `openshift_admin`):
+
+```bash
+{c['install']}           # a whole archive
+{c['assemble_install']}  # a split download: restore, verify, load and install
+```
+
+```bash
+openshift-admin                     # a login shell: oc login, oc get nodes, k9s, oc-status ...
+openshift-admin oc get co           # one command, then back on the host
+openshift-admin oc apply -f - < app.yaml
+openshift-admin --status | --restart | --stop
+```
+
+It installs `~/.local/bin/openshift-admin` and a systemd user service that
+keeps the container running (lingering is turned on when allowed, so it also
+runs after logout and starts at boot); no sudo and no root service. The
+container sees only `~/.kube` from the host and keeps its own home (shell
+history, caches) in the volume `openshift-admin-home`. Settings such as
+`HTTPS_PROXY` or `OPENSHIFT_ADMIN_PROD_PATTERN` go in
+`~/.config/openshift-admin/env`, one `VAR=value` per line.
+
+A new version: run the same command with the new archive. It tags the image
+`{host.CURRENT}`, recreates the container on it and keeps `~/.kube` and the
+home volume. `bash install-host.sh --uninstall` removes the command and the service.
+
+## Start with Distrobox
 
 ```bash
 {c['verify']}
@@ -230,6 +263,8 @@ The Podman socket is never mounted.
 ## Security
 
 * Rootless: no USER, no ENTRYPOINT and no service in the image; no SSH server.
+  `openshift-admin` runs it as your own user (`--userns=keep-id`), from a
+  systemd *user* service, with only `~/.kube` mounted from the host.
 * No kubeconfig, token, password, key or registry credential in any layer;
   LayerSmith's post-build check searches the image for them.
 * Every downloaded client is pinned by sha256 and verified before it is installed;
@@ -245,5 +280,6 @@ digest again and every package is updated. New client versions are added to
 LayerSmith's catalogue (`backend/scripts/pin_openshift.py` prints verified entries),
 never fetched as "latest". Then load the new archive, `podman tag` it as
 `{c['alias']}` and recreate the container (`{c['distrobox_remove']}`, then create
-again); your home and kubeconfigs are untouched.
+again); your home and kubeconfigs are untouched. With the `openshift-admin`
+command, `{c['install']}` (or `{c['assemble_install']}`) does all of that.
 """
