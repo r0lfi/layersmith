@@ -621,3 +621,15 @@ def test_a_gpu_benchmark_build_is_split_for_the_kit_right_away(client, hub, monk
     other = client.post(f"/api/projects/{plain['id']}/builds", json={}).json()["id"]
     run_pending_build(client, other)
     assert started == [gpu]
+
+
+def test_model_parts_resume_with_a_range_request(client, hub):
+    model = download(client)
+    listing = client.get(f"/api/llm-models/{model['id']}/files").json()
+    part = next(item for item in listing["files"] if item["kind"] == "part")
+    whole = client.get(part["url"]).content
+    assert len(whole) == part["size"] and hashlib.sha256(whole).hexdigest() == part["sha256"]
+    tail = client.get(part["url"], headers={"Range": "bytes=7-"})
+    assert tail.status_code == 206 and tail.content == whole[7:]
+    assert tail.headers["content-range"] == f"bytes 7-{len(whole) - 1}/{len(whole)}"
+    assert client.get(part["url"], headers={"Range": "bytes=3-9"}).content == whole[3:10]

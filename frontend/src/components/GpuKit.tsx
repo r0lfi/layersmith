@@ -123,7 +123,8 @@ export function GpuKit({ buildId }: { buildId: string }) {
             </p>
             {kit.ready && (
               <div style={{ marginBottom: "0.8rem" }}>
-                <DownloadAllButton files={kit.files.filter((file) => file.size !== undefined)} />
+                <DownloadAllButton files={kit.files.filter((file) => file.size !== undefined)}
+                                   script={script("download-all.sh")} />
               </div>
             )}
             <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>

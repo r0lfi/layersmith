@@ -600,7 +600,7 @@ DOWNLOAD_ALL = r"""#!/usr/bin/env bash
 #
 # Downloads every file of "@@TITLE@@" (@@COUNT@@ files, @@TOTAL_GB@@ GB) from
 # LayerSmith into the current directory, resuming interrupted downloads and
-# checking each part's sha256. Then copy the directory to the GPU host.
+# checking each part's sha256. Then copy the directory to the @@HOST@@.
 #
 #   ./download-all.sh [LAYERSMITH_URL]      (default: @@SERVER@@)
 
@@ -637,15 +637,15 @@ chmod +x ./*.sh 2>/dev/null
 if [ "$failed" -gt 0 ]; then echo; echo "$failed file(s) failed; run ./download-all.sh again to retry." >&2; exit 1; fi
 echo
 echo "All ${#FILES[@]} files downloaded and verified."
-echo "Copy this directory to the GPU host and run: @@NEXT@@"
+echo "Copy this directory to the @@HOST@@ and run: @@NEXT@@"
 """
 
 
-def download_all(title: str, server: str, files: list[dict], next_step: str) -> str:
+def download_all(title: str, server: str, files: list[dict], next_step: str, host: str = "GPU host") -> str:
     """files: [{"url": "/api/...", "name", "size", "sha256"?}]."""
     total = sum(int(f.get("size") or 0) for f in files)
     return _fill(DOWNLOAD_ALL, {
         "VERSION": config.VERSION, "TITLE": title.replace("\n", " "), "COUNT": str(len(files)),
-        "TOTAL_GB": f"{total / 1e9:.1f}", "SERVER": server, "SERVER_Q": quote(server), "NEXT": next_step,
+        "TOTAL_GB": f"{total / 1e9:.1f}", "SERVER": server, "SERVER_Q": quote(server), "NEXT": next_step, "HOST": host,
         "FILES": _array(f"{f['url']}|{f['name']}|{f.get('size') or ''}|{f.get('sha256') or ''}" for f in files),
     })

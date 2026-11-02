@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, formatDecimalBytes, SplitStatus } from "../api";
 import { Banner, usePoll } from "./ui";
 import { DownloadAllButton } from "./DownloadAll";
+import { CopyLink } from "./DownloadLinks";
 
 /** Status of a build's split download, polled while the server computes it. */
 export function useSplit(buildId: string, enabled: boolean) {
@@ -100,7 +101,8 @@ export function SplitFiles({ buildId, split }: { buildId: string; split: Split }
       <div style={{ marginBottom: "0.8rem" }}>
         <DownloadAllButton
           files={[...parts, ...extras].map((file) => ({ ...file, url: api.splitFileUrl(buildId, file.name) }))}
-          nextStep={`bash ${status.script} --load`} host="receiving host" />
+          nextStep={`bash ${status.script} --load`} host="receiving host"
+          script={{ name: "download-all.sh", url: api.splitFileUrl(buildId, "download-all.sh") }} />
       </div>
       <table className="table">
         <thead>
@@ -114,9 +116,10 @@ export function SplitFiles({ buildId, split }: { buildId: string; split: Split }
               <td data-label="SHA-256" className="mono faint split-sha" title={file.sha256 ?? ""}>
                 {file.sha256 ? file.sha256 : file.kind === "script" ? "restores and verifies" : "checksum list"}
               </td>
-              <td>
+              <td style={{ whiteSpace: "nowrap" }}>
                 <a className={`button${file.kind === "script" ? " primary" : ""}`}
-                   href={api.splitFileUrl(buildId, file.name)}>Download</a>
+                   href={api.splitFileUrl(buildId, file.name)}>Download</a>{" "}
+                <CopyLink url={api.splitFileUrl(buildId, file.name)} name={file.name} />
               </td>
             </tr>
           ))}

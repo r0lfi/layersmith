@@ -397,6 +397,10 @@ details > summary:hover { color: var(--text); }
 
 .code-wrap { position: relative; margin: 0.4rem 0; }
 .code-wrap .code { padding-right: 4.5rem; }
+.copy-links { display: inline-flex; gap: 0.25rem; vertical-align: middle; }
+button.copy-link { padding: 0.2rem 0.5rem; font-size: 0.75rem; font-weight: 520; }
+.wget-list { margin: 0.6rem 0; }
+.wget-list > summary { cursor: pointer; font-size: 0.88rem; color: var(--text-dim); }
 button.copy { position: absolute; top: 0.4rem; right: 0.4rem; padding: 0.2rem 0.55rem; font-size: 0.75rem; }
 
 .guide { border-top: 1px solid var(--border); padding: 0.4rem 0; }

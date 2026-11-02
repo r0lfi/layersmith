@@ -2,6 +2,7 @@ import { FormEvent, Fragment, useCallback, useState } from "react";
 import { api, BuildStatus, CatalogModel, DownloadFile, formatDecimalBytes, LlmModel } from "../api";
 import { Banner, Card, Empty, StatusPill, useLoad, usePoll } from "../components/ui";
 import { DownloadAllButton } from "../components/DownloadAll";
+import { CopyLink } from "../components/DownloadLinks";
 
 const ACTIVE_MODEL = ["queued", "downloading", "verifying"];
 
@@ -38,7 +39,7 @@ function ModelFiles({ model }: { model: LlmModel }) {
       <div style={{ marginBottom: "0.8rem" }}>
         {/* Everything the GPU host needs: parts, install script, checksum lists (not the download script). */}
         <DownloadAllButton files={data.files.filter((file) => file.size !== undefined)}
-                           nextStep={`bash ${data.install.replace("./", "")}`} />
+                           nextStep={`bash ${data.install.replace("./", "")}`} script={script} />
       </div>
       <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
         {script && <a className="button" href={script.url}>{script.name}</a>}
@@ -63,7 +64,9 @@ export function FileTable({ files }: { files: DownloadFile[] }) {
             <td data-label="SHA-256" className="mono faint split-sha" title={file.sha256 ?? ""}>
               {file.sha256 ?? (file.kind === "script" ? "script" : "checksum list")}
             </td>
-            <td><a className="button" href={file.url}>Download</a></td>
+            <td style={{ whiteSpace: "nowrap" }}>
+              <a className="button" href={file.url}>Download</a> <CopyLink url={file.url} name={file.name} />
+            </td>
           </tr>
         ))}
       </tbody>

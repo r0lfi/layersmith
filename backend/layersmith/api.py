@@ -8,6 +8,7 @@ path against the configured directory and refuses to leave it.
 import asyncio
 import hashlib
 import json
+import re
 import uuid
 import queue
 import shutil
@@ -213,6 +214,8 @@ def _build_json(build: Build, project: Project | None = None) -> dict:
         # removed from disk would otherwise be offered as a download that
         # answers 404.
         "has_export": _downloadable(build.export_path), "has_airgap": _downloadable(build.airgap_path),
+        "export_name": Path(build.export_path).name if build.export_path else None,
+        "airgap_name": Path(build.airgap_path).name if build.airgap_path else None,
         "airgap_size": build.airgap_size, "airgap_sha256": build.airgap_sha256,
         "started_at": build.started_at, "finished_at": build.finished_at, "created_at": build.created_at,
         "duration_seconds": build.duration_seconds,
@@ -1326,7 +1329,7 @@ def start_split(build_id: str, state=Depends(get_state)):
 
 
 @router.get("/builds/{build_id}/split/{filename}")
-def split_download(build_id: str, filename: str, state=Depends(get_state)):
+def split_download(build_id: str, filename: str, request: Request, state=Depends(get_state)):
     """One file of a split download. Only names listed in the manifest exist."""
     with state["session_factory"]() as session:
         build = _split_build(session, build_id)
@@ -1336,6 +1339,11 @@ def split_download(build_id: str, filename: str, state=Depends(get_state)):
             raise HTTPException(404, "This archive has not been split, or has changed since; split it again")
         path = _safe_download(build.export_path, [settings.image_dir, *storage.previous_image_dirs(session)])
     attachment = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if filename == DOWNLOAD_ALL_SCRIPT:
+        text = llm_scripts.download_all(f"split archive {manifest['archive']}", _server_url(request),
+                                        _split_files(build_id, manifest), f"bash {splitting.SCRIPT_NAME} --load",
+                                        host="receiving host")
+        return Response(text, media_type="text/plain", headers=attachment)
     tar_sums, part_sums = splitting.checksum_file_names(manifest["archive"])
     text = {splitting.SCRIPT_NAME: splitting.assemble_script, tar_sums: splitting.archive_checksum,
             part_sums: splitting.parts_checksums}.get(filename)
@@ -1344,9 +1352,124 @@ def split_download(build_id: str, filename: str, state=Depends(get_state)):
     part = next((part for part in manifest["parts"] if part["name"] == filename), None)
     if part is None:
         raise HTTPException(404, "No such file in this split archive")
-    return StreamingResponse(splitting.read_range(path, part["offset"], part["size"]),
-                             media_type="application/octet-stream",
-                             headers={**attachment, "Content-Length": str(part["size"])})
+    return _ranged(request, part["size"], lambda start, length: splitting.read_range(
+        path, part["offset"] + start, length), attachment)
+
+
+#: The script that fetches every file of a split archive with curl.
+DOWNLOAD_ALL_SCRIPT = "download-all.sh"
+
+
+def _split_files(build_id: str, manifest: dict) -> list[dict]:
+    return [{**f, "url": f"/api/builds/{build_id}/split/{f['name']}"} for f in splitting.downloads(manifest)]
+
+
+@router.get("/builds/{build_id}/files")
+def build_files(build_id: str, state=Depends(get_state)):
+    """Every file of a build that can be downloaded right now, each with its URL.
+
+    The same URLs the buttons use: plain GETs, so wget and curl fetch them
+    as well as a browser does.
+    """
+    with state["session_factory"]() as session:
+        build = session.get(Build, build_id)
+        if build is None:
+            raise HTTPException(404, "Build not found")
+        files = _build_files(session, build)
+    return {"build_id": build_id, "files": files}
+
+
+def _build_files(session, build: Build) -> list[dict]:
+    base = f"/api/builds/{build.id}"
+    files: list[dict] = []
+
+    def add(group: str, name: str, url: str, kind: str = "file", **extra):
+        files.append({"group": group, "name": name, "kind": kind, "url": url,
+                      **{k: v for k, v in extra.items() if v is not None}})
+
+    exported = build.status == "ready" and _downloadable(build.export_path)
+    if exported:
+        archive = Path(build.export_path).name
+        add("Image archive", archive, f"{base}/download/export", "part", size=build.export_size,
+            sha256=build.export_sha256)
+        if build.export_sha256:
+            add("Image archive", f"{archive}.sha256", f"{base}/download/export.sha256", "checksum")
+        manifest = splitting.current_manifest(build)
+        if manifest:
+            for f in _split_files(build.id, manifest):
+                add("Split archive", f["name"], f["url"], f["kind"], size=f.get("size"), sha256=f.get("sha256"))
+            add("Split archive", DOWNLOAD_ALL_SCRIPT, f"{base}/split/{DOWNLOAD_ALL_SCRIPT}", "script")
+    if _downloadable(build.airgap_path):
+        add("Air-gap bundle", Path(build.airgap_path).name, f"{base}/download/airgap", "part",
+            size=build.airgap_size, sha256=build.airgap_sha256)
+
+    ready = build.status == "ready"
+    try:
+        aiml = aiml_recipe(build.spec)
+    except aiml_catalog.AimlError:
+        aiml = None
+    if aiml is not None:
+        for fmt, entry in ((build.aiml or {}).get("exports") or {}).items():
+            if entry.get("status") == "ready" and _downloadable(entry.get("path")):
+                name = Path(entry["path"]).name
+                add("AI / ML / GPU", name, f"{base}/aiml/files/{fmt}", "part", size=entry.get("size"),
+                    sha256=entry.get("sha256"))
+                add("AI / ML / GPU", f"{name}.sha256", f"{base}/aiml/files/{fmt}.sha256", "checksum")
+        if ready:
+            for name in AIML_FILES:
+                if name == "requirements.lock" and not aiml_export.lock(build):
+                    continue
+                add("AI / ML / GPU", name, f"{base}/aiml/files/{name}")
+    for group, recipe_of, error, names, path in (
+            ("OpenShift Admin Toolkit", openshift_recipe, openshift_catalog.OpenShiftError, OPENSHIFT_FILES,
+             "openshift"),
+            ("opencode Shared Terminal", opencode_recipe, opencode_catalog.OpencodeError, OPENCODE_FILES,
+             "opencode")):
+        try:
+            recipe = recipe_of(build.spec)
+        except error:
+            recipe = None
+        if recipe is None or not ready:
+            continue
+        results = (build.checks or {}).get("results") or {}
+        for name in names:
+            if name == "versions.json" and not ((results.get("user") or {}).get("info") or {}).get("tools"):
+                continue
+            add(group, name, f"{base}/{path}/files/{name}")
+
+    scan = session.scalars(select(Scan).where(Scan.build_id == build.id, Scan.sbom_path.is_not(None))
+                           .order_by(Scan.created_at.desc())).first()
+    if scan is not None and Path(scan.sbom_path).is_file():
+        add("Security", f"sbom-{scan.id}.{scan.sbom_format or 'json'}.json", f"/api/scans/{scan.id}/sbom",
+            sha256=scan.sbom_sha256)
+    return files
+
+
+_RANGE = re.compile(r"bytes=(\d*)-(\d*)")
+
+
+def _ranged(request: Request, size: int, read, headers: dict) -> Response:
+    """Stream size bytes from read(start, length), honouring one Range header.
+
+    Parts are cut from a larger file on the fly, so FileResponse cannot serve
+    them; without this, `wget -c` and `curl -C -` could not resume a part.
+    """
+    headers = {**headers, "Accept-Ranges": "bytes"}
+    match = _RANGE.fullmatch((request.headers.get("range") or "").strip())
+    if match and (match[1] or match[2]):
+        if match[1]:
+            start = int(match[1])
+            end = min(int(match[2]), size - 1) if match[2] else size - 1
+        else:  # bytes=-N: the last N bytes
+            start, end = max(size - int(match[2]), 0), size - 1
+        if start >= size or start > end:
+            return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
+        length = end - start + 1
+        return StreamingResponse(read(start, length), status_code=206, media_type="application/octet-stream",
+                                 headers={**headers, "Content-Range": f"bytes {start}-{end}/{size}",
+                                          "Content-Length": str(length)})
+    return StreamingResponse(read(0, size), media_type="application/octet-stream",
+                             headers={**headers, "Content-Length": str(size)})
 
 
 # ------------------------------------------------------------- LLM models
@@ -1489,8 +1612,8 @@ def llm_model_file(model_id: str, filename: str, request: Request, state=Depends
     if "_text" in item:
         return Response(item["_text"], media_type="text/plain", headers=attachment)
     part = next(p for p in parts["parts"] if p["name"] == filename)
-    return StreamingResponse(service.read_part(model, part), media_type="application/octet-stream",
-                             headers={**attachment, "Content-Length": str(part["size"])})
+    return _ranged(request, part["size"], lambda start, length: service.read_part(
+        model, {**part, "offset": part["offset"] + start, "size": length}), attachment)
 
 
 # ---------------------------------------------------------------- GPU kit

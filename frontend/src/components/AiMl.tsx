@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AimlDetail, AimlTestRow, api, Build, formatBytes, SlurmParams } from "../api";
 import { CompatTable } from "../pages/AiMlWizard";
 import { CodeBlock } from "./Training";
+import { CopyLink } from "./DownloadLinks";
 import { Banner, Card, Field } from "./ui";
 
 const STATUS_ICON: Record<string, string> = { passed: "✓", failed: "✕", not_run: "–" };
@@ -254,7 +255,8 @@ export function AiMlPanel({ build, onChange, reload }: { build: Build; onChange:
                   <td data-label="SHA-256" className="mono split-sha" title={primary.sha256 ?? ""}>{primary.sha256}</td>
                   <td data-label="">
                     {primary.available && <><a className="button" href={api.downloadUrl(build.id, "export")}>Download</a>{" "}
-                      <a href={api.downloadUrl(build.id, "export.sha256")}>.sha256</a></>}
+                      <a href={api.downloadUrl(build.id, "export.sha256")}>.sha256</a>{" "}
+                      <CopyLink url={api.downloadUrl(build.id, "export")} name={primary.archive} /></>}
                   </td>
                 </tr>
                 {/* A Docker backend already writes a Docker archive; only Podman's OCI export needs the second format. */}
@@ -266,7 +268,8 @@ export function AiMlPanel({ build, onChange, reload }: { build: Build; onChange:
                   <td data-label="">
                     {docker?.available ? (
                       <><a className="button" href={api.aimlFileUrl(build.id, "docker-archive")}>Download</a>{" "}
-                        <a href={api.aimlFileUrl(build.id, "docker-archive.sha256")}>.sha256</a></>
+                        <a href={api.aimlFileUrl(build.id, "docker-archive.sha256")}>.sha256</a>{" "}
+                        <CopyLink url={api.aimlFileUrl(build.id, "docker-archive")} name={docker.archive} /></>
                     ) : docker?.status === "exporting" ? <span className="dim">Exporting…</span> : (
                       <button onClick={exportDocker}>Export</button>
                     )}

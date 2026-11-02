@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { DownloadFile, formatDecimalBytes } from "../api";
+import { WgetList } from "./DownloadLinks";
 
 /* The File System Access API (Chrome, Edge) is not in TypeScript's DOM types yet. */
 type DirectoryHandle = {
@@ -30,8 +31,10 @@ interface Progress {
  * files are handed to the browser's own download list one after another.
  * Checksums are verified on the GPU host by setup.sh and the install scripts.
  */
-export function DownloadAllButton({ files, label = "Download all", nextStep = "bash setup.sh", host = "GPU host" }: {
+export function DownloadAllButton({ files, label = "Download all", nextStep = "bash setup.sh", host = "GPU host", script }: {
   files: DownloadFile[];
+  /** The server's download-all.sh for these files, offered first in the wget list. */
+  script?: { name: string; url: string };
   label?: string;
   /** What to run on the target host once the folder is copied there. */
   nextStep?: string;
@@ -149,6 +152,7 @@ export function DownloadAllButton({ files, label = "Download all", nextStep = "b
       {message && (
         <p className={message.error ? "warning" : "faint"} role="status" style={{ marginBottom: 0 }}>{message.text}</p>
       )}
+      <WgetList files={files} script={script} />
     </div>
   );
 }

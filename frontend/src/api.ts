@@ -29,6 +29,9 @@ export interface Build {
   export_sha256?: string | null;
   has_export: boolean;
   has_airgap: boolean;
+  /** File names of the export and the air-gap bundle, for wget -O. */
+  export_name?: string | null;
+  airgap_name?: string | null;
   airgap_size?: number | null;
   airgap_sha256?: string | null;
   started_at?: string | null;
@@ -55,6 +58,12 @@ export interface SplitFile {
   kind: "part" | "script" | "checksum";
   size: number;
   sha256?: string;
+}
+
+/** One downloadable file of a build (GET /api/builds/{id}/files). */
+export interface BuildFile extends Omit<DownloadFile, "kind"> {
+  group: string;
+  kind: "part" | "script" | "checksum" | "file";
 }
 
 export interface SplitStatus {
@@ -952,6 +961,7 @@ export const api = {
   downloadUrl: (buildId: string, kind: "export" | "airgap" | "export.sha256") => `/api/builds/${buildId}/download/${kind}`,
   split: (buildId: string) => request<SplitStatus>(`/builds/${buildId}/split`),
   startSplit: (buildId: string) => request<SplitStatus>(`/builds/${buildId}/split`, { method: "POST" }),
+  buildFiles: (buildId: string) => request<{ build_id: string; files: BuildFile[] }>(`/builds/${buildId}/files`),
   splitFileUrl: (buildId: string, name: string) =>
     `/api/builds/${buildId}/split/${encodeURIComponent(name)}`,
 

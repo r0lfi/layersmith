@@ -9,6 +9,7 @@ import { GpuKit } from "../components/GpuKit";
 import { AiMlPanel } from "../components/AiMl";
 import { OpenShiftPanel } from "../components/OpenShift";
 import { OpencodePanel } from "../components/Opencode";
+import { BuildDownloadLinks, CopyLink } from "../components/DownloadLinks";
 
 function LogLine({ line }: { line: string }) {
   const className = /^STEP |^--> /.test(line)
@@ -56,6 +57,7 @@ function GpuBenchmarkPanel({ build }: { build: Build }) {
                     Download Podman Image (.tar) · {formatBytes(exported.size)}
                   </a>
                   <a className="button" href={api.downloadUrl(build.id, "export.sha256")}>SHA-256 file</a>
+                  <CopyLink url={api.downloadUrl(build.id, "export")} name={exported.archive} />
                   <span className="faint" style={{ flexBasis: "100%", fontSize: "0.85rem" }}>
                     Can only move files under 1 GB, or want the models and a one-command setup too? Use the{" "}
                     <a href="#gpu-kit">GPU kit</a> below.
@@ -193,7 +195,8 @@ export default function BuildDetail() {
                   <>
                     <a className="button" href={api.downloadUrl(build.id, "export")}>
                       Download TAR ({formatDecimalBytes(build.export_size)})
-                    </a>
+                    </a>{" "}
+                    <CopyLink url={api.downloadUrl(build.id, "export")} name={build.export_name ?? undefined} />
                     <SplitControls split={split} />
                   </>
                 )}
@@ -207,9 +210,12 @@ export default function BuildDetail() {
                   Roughly the same size as the TAR.
                 </p>
                 {build.has_airgap ? (
-                  <a className="button primary" href={api.downloadUrl(build.id, "airgap")}>
-                    Download air-gap bundle ({formatBytes(build.airgap_size)})
-                  </a>
+<>
+                    <a className="button primary" href={api.downloadUrl(build.id, "airgap")}>
+                      Download air-gap bundle ({formatBytes(build.airgap_size)})
+                    </a>{" "}
+                    <CopyLink url={api.downloadUrl(build.id, "airgap")} name={build.airgap_name ?? undefined} />
+                  </>
                 ) : (
                   <button className="primary" onClick={makeBundle} disabled={busy}>
                     {busy ? "Bundling…" : "Create air-gap bundle"}
@@ -258,6 +264,11 @@ export default function BuildDetail() {
           scannerAvailable={!!settings?.scanner?.available}
           scannerDetail={settings?.scanner?.detail ?? ""}
         />
+      )}
+
+      {build.status === "ready" && (
+        <BuildDownloadLinks buildId={build.id} version={[build.has_export, build.has_airgap, split.status?.state,
+          JSON.stringify(build.aiml?.exports ?? null)].join("|")} />
       )}
 
       <Card
